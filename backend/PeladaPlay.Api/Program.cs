@@ -34,7 +34,7 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 builder.Services.AddDbContext<PeladaPlayDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 builder.Services.AddScoped<TokenService>();
 
@@ -55,10 +55,18 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     });
 
 builder.Services.AddCors(options =>
-{
-    options.AddPolicy("AllowFrontend", policy =>
-        policy.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader());
-});
+    {
+        options.AddPolicy("AllowFrontend", policy =>
+        {
+            policy.WithOrigins(
+                "http://localhost:5500",
+                "http://127.0.0.1:5500",
+                "https://peladaplay-kappa.vercel.app"
+              )
+              .AllowAnyHeader()
+              .AllowAnyMethod();
+        });
+    });
 
 var app = builder.Build();
 
@@ -75,6 +83,7 @@ app.UseAuthorization();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<PeladaPlay.Infrastructure.Data.PeladaPlayDbContext>();
+    db.Database.Migrate();
     if (!db.Venues.Any())
     {
         db.Venues.AddRange(

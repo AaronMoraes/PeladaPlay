@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace PeladaPlay.Infrastructure.Migrations
 {
     /// <inheritdoc />
-    public partial class InitialCreate : Migration
+    public partial class InitialPostgres : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
@@ -15,17 +15,17 @@ namespace PeladaPlay.Infrastructure.Migrations
                 name: "Users",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    FullName = table.Column<string>(type: "nvarchar(150)", maxLength: 150, nullable: false),
-                    Email = table.Column<string>(type: "nvarchar(150)", maxLength: 150, nullable: false),
-                    PasswordHash = table.Column<string>(type: "nvarchar(max)", nullable: false),
-                    PhotoUrl = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    Position = table.Column<string>(type: "nvarchar(max)", nullable: false),
-                    PreferredFoot = table.Column<int>(type: "int", nullable: false),
-                    ShirtNumber = table.Column<int>(type: "int", nullable: false),
-                    City = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    Phone = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false)
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    FullName = table.Column<string>(type: "character varying(150)", maxLength: 150, nullable: false),
+                    Email = table.Column<string>(type: "character varying(150)", maxLength: 150, nullable: false),
+                    PasswordHash = table.Column<string>(type: "text", nullable: false),
+                    PhotoUrl = table.Column<string>(type: "text", nullable: true),
+                    Position = table.Column<string>(type: "text", nullable: false),
+                    PreferredFoot = table.Column<int>(type: "integer", nullable: false),
+                    ShirtNumber = table.Column<int>(type: "integer", nullable: false),
+                    City = table.Column<string>(type: "text", nullable: true),
+                    Phone = table.Column<string>(type: "text", nullable: true),
+                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -36,10 +36,10 @@ namespace PeladaPlay.Infrastructure.Migrations
                 name: "Venues",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    Name = table.Column<string>(type: "nvarchar(150)", maxLength: 150, nullable: false),
-                    Address = table.Column<string>(type: "nvarchar(max)", nullable: false),
-                    DefaultPrice = table.Column<decimal>(type: "decimal(10,2)", precision: 10, scale: 2, nullable: true)
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    Name = table.Column<string>(type: "character varying(150)", maxLength: 150, nullable: false),
+                    Address = table.Column<string>(type: "text", nullable: false),
+                    DefaultPrice = table.Column<decimal>(type: "numeric(10,2)", precision: 10, scale: 2, nullable: true)
                 },
                 constraints: table =>
                 {
@@ -50,17 +50,17 @@ namespace PeladaPlay.Infrastructure.Migrations
                 name: "Clubs",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    Name = table.Column<string>(type: "nvarchar(150)", maxLength: 150, nullable: false),
-                    InviteCode = table.Column<string>(type: "nvarchar(450)", nullable: false),
-                    DayOfWeek = table.Column<int>(type: "int", nullable: false),
-                    StartTime = table.Column<TimeSpan>(type: "time", nullable: false),
-                    Duration = table.Column<TimeSpan>(type: "time", nullable: false),
-                    ExpectedPlayers = table.Column<int>(type: "int", nullable: false),
-                    PlayersPerTeam = table.Column<int>(type: "int", nullable: false),
-                    GoalkeepersPay = table.Column<bool>(type: "bit", nullable: false),
-                    CashReserve = table.Column<decimal>(type: "decimal(10,2)", precision: 10, scale: 2, nullable: false),
-                    DefaultVenueId = table.Column<Guid>(type: "uniqueidentifier", nullable: true)
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    Name = table.Column<string>(type: "character varying(150)", maxLength: 150, nullable: false),
+                    InviteCode = table.Column<string>(type: "text", nullable: false),
+                    DayOfWeek = table.Column<int>(type: "integer", nullable: false),
+                    StartTime = table.Column<TimeSpan>(type: "interval", nullable: false),
+                    Duration = table.Column<TimeSpan>(type: "interval", nullable: false),
+                    ExpectedPlayers = table.Column<int>(type: "integer", nullable: false),
+                    PlayersPerTeam = table.Column<int>(type: "integer", nullable: false),
+                    GoalkeepersPay = table.Column<bool>(type: "boolean", nullable: false),
+                    CashReserve = table.Column<decimal>(type: "numeric(10,2)", precision: 10, scale: 2, nullable: false),
+                    DefaultVenueId = table.Column<Guid>(type: "uuid", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -76,13 +76,13 @@ namespace PeladaPlay.Infrastructure.Migrations
                 name: "ClubMembers",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    ClubId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    UserId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    Role = table.Column<int>(type: "int", nullable: false),
-                    SkillRank = table.Column<int>(type: "int", nullable: false),
-                    IsGoalkeeper = table.Column<bool>(type: "bit", nullable: false),
-                    JoinedAt = table.Column<DateTime>(type: "datetime2", nullable: false)
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    ClubId = table.Column<Guid>(type: "uuid", nullable: false),
+                    UserId = table.Column<Guid>(type: "uuid", nullable: false),
+                    Role = table.Column<int>(type: "integer", nullable: false),
+                    SkillRank = table.Column<int>(type: "integer", nullable: false),
+                    IsGoalkeeper = table.Column<bool>(type: "boolean", nullable: false),
+                    JoinedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -105,14 +105,14 @@ namespace PeladaPlay.Infrastructure.Migrations
                 name: "Matches",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    ClubId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    MatchDateTime = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    Status = table.Column<int>(type: "int", nullable: false),
-                    CourtCost = table.Column<decimal>(type: "decimal(10,2)", precision: 10, scale: 2, nullable: false),
-                    PixReceiverName = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    PixKey = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    IsSumulaValidated = table.Column<bool>(type: "bit", nullable: false)
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    ClubId = table.Column<Guid>(type: "uuid", nullable: false),
+                    MatchDateTime = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    Status = table.Column<int>(type: "integer", nullable: false),
+                    CourtCost = table.Column<decimal>(type: "numeric(10,2)", precision: 10, scale: 2, nullable: false),
+                    PixReceiverName = table.Column<string>(type: "text", nullable: true),
+                    PixKey = table.Column<string>(type: "text", nullable: true),
+                    IsSumulaValidated = table.Column<bool>(type: "boolean", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -129,11 +129,11 @@ namespace PeladaPlay.Infrastructure.Migrations
                 name: "MatchGames",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    MatchId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    Title = table.Column<string>(type: "nvarchar(max)", nullable: false),
-                    TeamLeft = table.Column<string>(type: "nvarchar(max)", nullable: false),
-                    TeamRight = table.Column<string>(type: "nvarchar(max)", nullable: false)
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    MatchId = table.Column<Guid>(type: "uuid", nullable: false),
+                    Title = table.Column<string>(type: "text", nullable: false),
+                    TeamLeft = table.Column<string>(type: "text", nullable: false),
+                    TeamRight = table.Column<string>(type: "text", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -150,16 +150,16 @@ namespace PeladaPlay.Infrastructure.Migrations
                 name: "MatchRegistrations",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    MatchId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    UserId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                    DisplayName = table.Column<string>(type: "nvarchar(max)", nullable: false),
-                    IsGoalkeeper = table.Column<bool>(type: "bit", nullable: false),
-                    IsWaitlist = table.Column<bool>(type: "bit", nullable: false),
-                    LockedAmount = table.Column<decimal>(type: "decimal(10,2)", precision: 10, scale: 2, nullable: false),
-                    PaymentStatus = table.Column<int>(type: "int", nullable: false),
-                    TeamAssigned = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    RegisteredAt = table.Column<DateTime>(type: "datetime2", nullable: false)
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    MatchId = table.Column<Guid>(type: "uuid", nullable: false),
+                    UserId = table.Column<Guid>(type: "uuid", nullable: true),
+                    DisplayName = table.Column<string>(type: "text", nullable: false),
+                    IsGoalkeeper = table.Column<bool>(type: "boolean", nullable: false),
+                    IsWaitlist = table.Column<bool>(type: "boolean", nullable: false),
+                    LockedAmount = table.Column<decimal>(type: "numeric(10,2)", precision: 10, scale: 2, nullable: false),
+                    PaymentStatus = table.Column<int>(type: "integer", nullable: false),
+                    TeamAssigned = table.Column<string>(type: "text", nullable: true),
+                    RegisteredAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -182,11 +182,11 @@ namespace PeladaPlay.Infrastructure.Migrations
                 name: "MatchGoals",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    MatchGameId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    TeamName = table.Column<string>(type: "nvarchar(max)", nullable: false),
-                    ScorerRegistrationId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    AssistRegistrationId = table.Column<Guid>(type: "uniqueidentifier", nullable: true)
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    MatchGameId = table.Column<Guid>(type: "uuid", nullable: false),
+                    TeamName = table.Column<string>(type: "text", nullable: false),
+                    ScorerRegistrationId = table.Column<Guid>(type: "uuid", nullable: false),
+                    AssistRegistrationId = table.Column<Guid>(type: "uuid", nullable: true)
                 },
                 constraints: table =>
                 {
