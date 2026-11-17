@@ -346,8 +346,9 @@ async function selectClub(clubId) {
     document.getElementById("club-reserve").textContent = formatMoney(club.cashReserve);
 
     const venueTxt = club.defaultVenue ? ` • ${club.defaultVenue.name}` : "";
+    const timeFormatted = club.defaultTime ? club.defaultTime.slice(0, 5) : "20:00";
     document.getElementById("club-schedule").textContent =
-      `Toda ${DAY_LABELS[club.defaultDayOfWeek]} às ${club.defaultTime.slice(0, 5)} • ${club.expectedPlayers} vagas${venueTxt}`;
+      `Toda ${DAY_LABELS[club.defaultDayOfWeek]} às ${timeFormatted} • ${club.expectedPlayers} vagas${venueTxt}`;
 
     document.getElementById("btn-new-match-home").classList.toggle("hidden", !isStaff);
     document.getElementById("btn-quick-next-match").classList.toggle("hidden", !isStaff);
