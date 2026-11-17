@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#090B0E" />
+  <title>PeladaPlay — Fusion Sports Tech</title>
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#10b981" />
+  <link rel="icon" type="image/png" href="icon-192.png" />
+  <link rel="apple-touch-icon" href="icon-512.png" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- ================= TELA 1: AUTENTICAÇÃO ================= -->
+  <section id="auth-view" class="auth-wrapper">
+    <div class="bento-card auth-card">
+      <div class="brand-header">
+        <span class="badge-neon">FUSION SPORTS TECH</span>
+        <h1>Pelada<span>Play</span></h1>
+        <p>Gestão tática, lista inteligente e financeiro transparente.</p>
+      </div>
+
+      <div class="tab-switch">
+        <button id="tab-login" class="tab-btn active" onclick="switchAuthTab('login')">Entrar</button>
+        <button id="tab-register" class="tab-btn" onclick="switchAuthTab('register')">Criar PRO ID</button>
+      </div>
+
+      <form id="login-form" onsubmit="handleLogin(event)">
+        <div class="form-group">
+          <label>E-mail</label>
+          <input type="email" id="login-email" placeholder="atleta@peladaplay.com" required />
+        </div>
+        <div class="form-group">
+          <label>Senha</label>
+          <input type="password" id="login-password" placeholder="••••••••" required />
+        </div>
+        <button type="submit" class="btn-primary w-full">Entrar em Campo</button>
+      </form>
+
+      <form id="register-form" class="hidden" onsubmit="handleRegister(event)">
+        <div class="form-group">
+          <label>Nome Completo / Apelido</label>
+          <input type="text" id="reg-name" placeholder="Ex: Lucas Silva" required />
+        </div>
+        <div class="grid-2">
+          <div class="form-group">
+            <label>E-mail</label>
+            <input type="email" id="reg-email" placeholder="lucas@email.com" required />
+          </div>
+          <div class="form-group">
+            <label>Senha</label>
+            <input type="password" id="reg-password" placeholder="Mín. 6 caracteres" required />
+          </div>
+        </div>
+        <div class="grid-3">
+          <div class="form-group">
+            <label>Posição</label>
+            <select id="reg-position">
+              <option value="Atacante">Atacante</option>
+              <option value="Meia">Meia</option>
+              <option value="Zagueiro">Zagueiro</option>
+              <option value="Lateral">Lateral</option>
+              <option value="Goleiro">Goleiro</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Pé Bom</label>
+            <select id="reg-foot">
+              <option value="0">Destro</option>
+              <option value="1">Canhoto</option>
+              <option value="2">Ambidestro</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Camisa Nº</label>
+            <input type="number" id="reg-shirt" value="10" min="1" max="99" required />
+          </div>
+        </div>
+        <button type="submit" class="btn-primary w-full">Gerar Meu PRO ID</button>
+      </form>
+    </div>
+  </section>
+
+  <!-- ================= TELA 2: APP PRINCIPAL ================= -->
+  <div id="app-view" class="app-shell hidden">
+    <!-- TOPBAR -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <div class="logo-mini">Pelada<span>Play</span></div>
+        <select id="club-selector" class="club-select" onchange="selectClub(this.value)">
+          <option value="">Selecione um Clube...</option>
+        </select>
+      </div>
+      <div class="topbar-right">
+        <button class="btn-secondary btn-sm" onclick="openClubModal()">+ Clube / Convite</button>
+        <button class="btn-danger-ghost btn-sm" onclick="logout()">Sair</button>
+      </div>
+    </header>
+
+    <!-- BARRA DE NAVEGAÇÃO PRINCIPAL -->
+    <nav class="main-nav">
+      <button class="nav-item active" data-page="home" onclick="navigateTo('home')">
+        <span class="nav-icon">⚡</span>
+        <span>Início</span>
+      </button>
+      <button class="nav-item" data-page="matches" onclick="navigateTo('matches')">
+        <span class="nav-icon">⚽</span>
+        <span>Peladas</span>
+      </button>
+      <button class="nav-item" data-page="squad" onclick="navigateTo('squad')">
+        <span class="nav-icon">🛡️</span>
+        <span>Elenco</span>
+      </button>
+      <button class="nav-item" data-page="rankings" onclick="navigateTo('rankings')">
+        <span class="nav-icon">🏆</span>
+        <span>Rankings</span>
+      </button>
+      <button class="nav-item" data-page="venues" onclick="navigateTo('venues')">
+        <span class="nav-icon">🏟️</span>
+        <span>Locais</span>
+      </button>
+      <button class="nav-item" data-page="profile" onclick="navigateTo('profile')">
+        <span class="nav-icon">🪪</span>
+        <span>Perfil</span>
+      </button>
+    </nav>
+
+    <!-- ================= PÁGINA 1: INÍCIO ================= -->
+    <main id="page-home" class="page-section bento-container">
+      <article class="bento-card">
+        <div class="card-top">
+          <span id="club-role-badge" class="badge-neon">SEM CLUBE</span>
+          <div style="display:flex; gap:6px; align-items:center;">
+            <span id="club-invite-code" class="mono-tag copyable" title="Clique para copiar" onclick="copyInviteCode()">---</span>
+            <button id="btn-club-settings" class="btn-secondary btn-sm hidden" title="Configurações do Clube e Caixinha" onclick="openClubSettingsModal()">⚙️</button>
+          </div>
+        </div>
+        <h2 id="club-title">Nenhum clube selecionado</h2>
+        <p id="club-schedule" class="muted-text">Crie um clube ou entre via código de convite.</p>
+        <div class="reserve-box">
+          <div>
+            <span class="stat-label">CAIXINHA DO CLUBE</span>
+            <div id="club-reserve" class="reserve-value">R$ 0,00</div>
+          </div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button id="btn-quick-next-match" class="btn-primary hidden" onclick="quickScheduleNextWeeklyMatch()">⚡ Agendar Próxima</button>
+            <button id="btn-new-match-home" class="btn-secondary hidden" onclick="openMatchModal()">+ Outra Data</button>
+          </div>
+        </div>
+      </article>
+
+      <article class="bento-card">
+        <div class="card-top">
+          <span class="badge-titanium">MEU PRO ID</span>
+          <span id="home-pro-shirt" class="mono-tag">#10</span>
+        </div>
+        <h2 id="home-pro-name">Atleta</h2>
+        <p id="home-pro-meta" class="muted-text">Posição • Pé</p>
+        <div class="stats-row">
+          <div class="stat-box">
+            <span id="home-stat-matches" class="stat-num">0</span>
+            <span class="stat-label">Jogos</span>
+          </div>
+          <div class="stat-box">
+            <span id="home-stat-goals" class="stat-num neon-text">0</span>
+            <span class="stat-label">Gols</span>
+          </div>
+          <div class="stat-box">
+            <span id="home-stat-assists" class="stat-num">0</span>
+            <span class="stat-label">Assist.</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="bento-card span-2">
+        <div class="card-top">
+          <h3>Próxima Pelada em Destaque</h3>
+          <button class="btn-ghost btn-sm" onclick="navigateTo('matches')">Ver todas →</button>
+        </div>
+        <div id="home-next-match">
+          <p class="muted-text">Nenhuma partida agendada para este clube.</p>
+        </div>
+      </article>
+    </main>
+
+    <!-- ================= PÁGINA 2: PELADAS ================= -->
+    <main id="page-matches" class="page-section bento-container hidden">
+      <article class="bento-card span-2">
+        <div class="card-top">
+          <div>
+            <h2>Partidas do Clube</h2>
+            <p class="muted-text">Selecione uma partida para gerenciar presença, janela Pix 24h, times e súmula.</p>
+          </div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button id="btn-quick-next-match-page" class="btn-primary hidden" onclick="quickScheduleNextWeeklyMatch()">⚡ Agendar Próxima</button>
+            <button id="btn-new-match-page" class="btn-secondary hidden" onclick="openMatchModal()">+ Outra Data</button>
+          </div>
+        </div>
+        <div id="matches-list" class="matches-grid"></div>
+      </article>
+
+      <article id="match-detail-panel" class="bento-card span-2 hidden">
+        <div class="match-banner">
+          <div>
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:6px;">
+              <span id="detail-status-badge" class="badge-neon">LISTA ABERTA</span>
+              <span id="detail-pix-countdown" class="mono-tag">⏳ Janela Pix</span>
+            </div>
+            <h2 id="detail-title">Pelada</h2>
+            <p id="detail-subtitle" class="muted-text"></p>
+          </div>
+          <div class="match-actions">
+            <button id="btn-join-match" class="btn-primary" onclick="joinCurrentMatch(false)">Tô Dentro (Linha)</button>
+            <button id="btn-join-gk" class="btn-secondary" onclick="joinCurrentMatch(true)">Vou no Gol</button>
+            <button class="btn-secondary" onclick="copyWhatsAppRoster()">📲 Copiar p/ WhatsApp</button>
+            <button id="btn-open-pix" class="btn-warning hidden" onclick="openPixWindow()">Abrir Pix Agora</button>
+            <button id="btn-draw-teams" class="btn-secondary hidden" onclick="drawTeams()">Sortear Times</button>
+          </div>
+        </div>
+
+        <div class="finance-strip">
+          <div>
+            <span class="stat-label">COTA ESTIMADA / CONGELADA</span>
+            <strong id="fin-per-player" class="neon-text">R$ 0,00</strong>
+          </div>
+          <div>
+            <span class="stat-label">ARRECADADO CONFIRMADO</span>
+            <strong id="fin-collected">R$ 0,00</strong>
+          </div>
+          <div>
+            <span class="stat-label">EXCEDENTE P/ CAIXINHA</span>
+            <strong id="fin-surplus">R$ 0,00</strong>
+          </div>
+          <div>
+            <span class="stat-label">CHAVE PIX DO ORGANIZADOR</span>
+            <strong id="fin-pix-key" class="mono-tag copyable" title="Clique para copiar" onclick="copyMatchPixKey()">Não informada</strong>
+          </div>
+        </div>
+
+        <div class="inner-tabs">
+          <button class="inner-tab active" onclick="switchInnerTab('roster', this)">Lista & Pix</button>
+          <button class="inner-tab" onclick="switchInnerTab('teams', this)">Times Sorteados</button>
+          <button class="inner-tab" onclick="switchInnerTab('sumula', this)">Súmula Oficial</button>
+        </div>
+
+        <div id="tab-roster" class="inner-content">
+          <div id="guest-bar" class="guest-bar hidden">
+            <input type="text" id="guest-name-input" placeholder="Nome do convidado avulso..." />
+            <label class="checkbox-inline"><input type="checkbox" id="guest-gk-input" /> Goleiro</label>
+            <button class="btn-secondary" onclick="addGuest()">+ Convidado</button>
+          </div>
+          <div id="roster-list" class="roster-list"></div>
+        </div>
+
+        <div id="tab-teams" class="inner-content hidden">
+          <div id="teams-grid" class="teams-grid"></div>
+        </div>
+
+        <div id="tab-sumula" class="inner-content hidden">
+          <div id="sumula-admin-bar" class="sumula-bar hidden">
+            <input type="text" id="game-title" placeholder="Ex: Jogo 1" value="Jogo 1" />
+            <select id="game-left"></select>
+            <select id="game-right"></select>
+            <button class="btn-secondary" onclick="createGame()">+ Criar Jogo</button>
+            <button id="btn-validate-sumula" class="btn-primary" onclick="validateSumula()">Validar Súmula Oficial</button>
+          </div>
+          <div id="games-list" class="games-list"></div>
+        </div>
+      </article>
+    </main>
+
+    <!-- ================= PÁGINA 3: ELENCO ================= -->
+    <main id="page-squad" class="page-section bento-container hidden">
+      <article class="bento-card span-2">
+        <div class="card-top">
+          <div>
+            <h2>Elenco & Avaliação Técnica</h2>
+            <p class="muted-text">As estrelas (1★ a 5★) e cargos valem exclusivamente dentro deste clube.</p>
+          </div>
+          <span id="squad-count-badge" class="badge-titanium">0 atletas</span>
+        </div>
+        <div id="squad-list" class="roster-list"></div>
+      </article>
+    </main>
+
+    <!-- ================= PÁGINA 4: RANKINGS ================= -->
+    <main id="page-rankings" class="page-section bento-container hidden">
+      <article class="bento-card span-2">
+        <div class="card-top">
+          <div>
+            <h2>Ranking da Temporada</h2>
+            <p class="muted-text">Estatísticas contabilizadas automaticamente após a validação oficial de cada súmula.</p>
+          </div>
+          <span class="badge-neon">SÚMULAS VALIDADAS</span>
+        </div>
+        <div id="rankings-list" class="roster-list"></div>
+      </article>
+    </main>
+
+    <!-- ================= PÁGINA 5: LOCAIS ================= -->
+    <main id="page-venues" class="page-section bento-container hidden">
+      <article class="bento-card">
+        <h2>Cadastrar Nova Arena / Quadra</h2>
+        <p class="muted-text mb-20">Deixe o valor em branco caso o aluguel seja "Sob consulta".</p>
+        <form onsubmit="handleCreateVenue(event)">
+          <div class="form-group">
+            <label>Nome do Local</label>
+            <input type="text" id="venue-name" placeholder="Ex: Arena Society Titanium" required />
+          </div>
+          <div class="form-group">
+            <label>Endereço Completo</label>
+            <input type="text" id="venue-address" placeholder="Rua, Bairro, Cidade" required />
+          </div>
+          <div class="form-group">
+            <label>Valor Padrão por Hora/Pelada (Opcional)</label>
+            <input type="number" id="venue-price" step="0.01" placeholder="Ex: 300.00 (vazio = Sob consulta)" />
+          </div>
+          <button type="submit" class="btn-primary w-full">Salvar Quadra</button>
+        </form>
+      </article>
+
+      <article class="bento-card">
+        <div class="card-top">
+          <h2>Arenas Cadastradas</h2>
+          <span id="venues-count" class="badge-titanium">0 locais</span>
+        </div>
+        <div class="form-group">
+          <input type="text" id="venue-search" placeholder="Filtrar quadra por nome ou bairro..." oninput="filterVenuesList()" />
+        </div>
+        <div id="venues-list" class="roster-list"></div>
+      </article>
+    </main>
+
+    <!-- ================= PÁGINA 6: PERFIL PRO ID ================= -->
+    <main id="page-profile" class="page-section bento-container hidden">
+      <article class="bento-card">
+        <div class="card-top">
+          <span class="badge-neon">PRO ID GLOBAL</span>
+          <span id="prof-shirt" class="mono-tag">#10</span>
+        </div>
+        <div class="profile-hero">
+          <img id="prof-avatar" src="https://ui-avatars.com/api/?name=Atleta&background=00F5A0&color=061014&bold=true" alt="Avatar" class="avatar-lg" />
+          <div>
+            <h2 id="prof-name">Atleta</h2>
+            <p id="prof-email" class="muted-text">email@dominio.com</p>
+            <p id="prof-meta" class="muted-text">Posição • Pé • Cidade</p>
+          </div>
+        </div>
+        <div class="stats-row">
+          <div class="stat-box">
+            <span id="prof-stat-matches" class="stat-num">0</span>
+            <span class="stat-label">Jogos</span>
+          </div>
+          <div class="stat-box">
+            <span id="prof-stat-goals" class="stat-num neon-text">0</span>
+            <span class="stat-label">Gols</span>
+          </div>
+          <div class="stat-box">
+            <span id="prof-stat-assists" class="stat-num">0</span>
+            <span class="stat-label">Assist.</span>
+          </div>
+          <div class="stat-box">
+            <span id="prof-stat-avg" class="stat-num">0.0</span>
+            <span class="stat-label">G+A / Jogo</span>
+          </div>
+        </div>
+
+        <h4 class="mt-20 mb-10">Meus Vínculos por Clube</h4>
+        <div id="prof-clubs-list" class="roster-list"></div>
+      </article>
+
+      <article class="bento-card">
+        <h2>Editar Dados do Atleta</h2>
+        <p class="muted-text mb-20">Personalize sua ficha técnica visível para todos os seus clubes.</p>
+        <form onsubmit="handleUpdateProfile(event)">
+          <div class="form-group">
+            <label>Nome Completo / Apelido</label>
+            <input type="text" id="edit-name" required />
+          </div>
+          <div class="grid-3">
+            <div class="form-group">
+              <label>Posição</label>
+              <select id="edit-position">
+                <option value="Atacante">Atacante</option>
+                <option value="Meia">Meia</option>
+                <option value="Zagueiro">Zagueiro</option>
+                <option value="Lateral">Lateral</option>
+                <option value="Goleiro">Goleiro</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Pé Preferido</label>
+              <select id="edit-foot">
+                <option value="0">Destro</option>
+                <option value="1">Canhoto</option>
+                <option value="2">Ambidestro</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Camisa Nº</label>
+              <input type="number" id="edit-shirt" min="1" max="99" required />
+            </div>
+          </div>
+          <div class="grid-2">
+            <div class="form-group">
+              <label>Cidade</label>
+              <input type="text" id="edit-city" placeholder="Ex: Araraquara - SP" />
+            </div>
+            <div class="form-group">
+              <label>WhatsApp / Telefone</label>
+              <input type="text" id="edit-phone" placeholder="(16) 99999-9999" />
+            </div>
+          </div>
+          <div class="form-group">
+            <label>URL da Foto de Perfil (Opcional)</label>
+            <input type="url" id="edit-photo" placeholder="https://..." />
+          </div>
+          <button type="submit" class="btn-primary w-full">Salvar Alterações do PRO ID</button>
+        </form>
+      </article>
+    </main>
+  </div>
+
+  <!-- ================= MODAL 1: CRIAR / ENTRAR EM CLUBE ================= -->
+  <div id="modal-club" class="modal-backdrop hidden">
+    <div class="bento-card modal-box">
+      <div class="card-top">
+        <h3>Clubes & Convites</h3>
+        <button class="btn-ghost" onclick="closeModal('modal-club')">✕</button>
+      </div>
+
+      <form onsubmit="handleJoinClub(event)" class="mb-20">
+        <label>Entrar com Código de Convite</label>
+        <div class="inline-form">
+          <input type="text" id="invite-code-input" placeholder="Ex: PELADA26" required />
+          <button type="submit" class="btn-secondary">Entrar</button>
+        </div>
+      </form>
+
+      <hr class="divider" />
+
+      <form onsubmit="handleCreateClub(event)">
+        <h4 class="mb-10">Ou Criar Novo Clube (Você será Admin)</h4>
+        <div class="form-group">
+          <label>Nome do Clube / Pelada</label>
+          <input type="text" id="new-club-name" placeholder="Ex: Quinta dos Boleiros FC" required />
+        </div>
+        <div class="form-group">
+          <label>Quadra Padrão (Opcional)</label>
+          <select id="new-club-venue">
+            <option value="">Sem quadra fixa</option>
+          </select>
+        </div>
+        <div class="grid-2">
+          <div class="form-group">
+            <label>Dia da Semana</label>
+            <select id="new-club-day">
+              <option value="1">Segunda-feira</option>
+              <option value="2">Terça-feira</option>
+              <option value="3">Quarta-feira</option>
+              <option value="4" selected>Quinta-feira</option>
+              <option value="5">Sexta-feira</option>
+              <option value="6">Sábado</option>
+              <option value="0">Domingo</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Horário</label>
+            <input type="time" id="new-club-time" value="20:00" required />
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="form-group">
+            <label>Vagas Totais</label>
+            <input type="number" id="new-club-players" value="15" min="4" required />
+          </div>
+          <div class="form-group">
+            <label>Jogadores por Time</label>
+            <input type="number" id="new-club-per-team" value="5" min="2" required />
+          </div>
+        </div>
+        <label class="checkbox-inline mb-10">
+          <input type="checkbox" id="new-club-gk-pay" /> Goleiros pagam rateio normalmente
+        </label>
+        <button type="submit" class="btn-primary w-full">Criar Clube</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ================= MODAL 2: CRIAR NOVA PARTIDA ================= -->
+  <div id="modal-match" class="modal-backdrop hidden">
+    <div class="bento-card modal-box">
+      <div class="card-top">
+        <h3>Agendar Nova Pelada</h3>
+        <button class="btn-ghost" onclick="closeModal('modal-match')">✕</button>
+      </div>
+      <form onsubmit="handleCreateMatch(event)">
+        <div class="form-group">
+          <label>Selecionar Quadra Cadastrada (Opcional)</label>
+          <select id="match-venue-select" onchange="applyVenuePriceToMatch(this.value)">
+            <option value="">Digitar valor manualmente</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Data e Hora da Partida</label>
+          <input type="datetime-local" id="match-datetime" required />
+        </div>
+        <div class="form-group">
+          <label>Valor Total da Quadra (R$)</label>
+          <input type="number" id="match-cost" step="0.01" value="300.00" required />
+        </div>
+        <div class="grid-2">
+          <div class="form-group">
+            <label>Recebedor Pix</label>
+            <input type="text" id="match-pix-name" placeholder="Nome do Tesoureiro" />
+          </div>
+          <div class="form-group">
+            <label>Chave Pix</label>
+            <input type="text" id="match-pix-key" placeholder="CPF, Celular ou E-mail" />
+          </div>
+        </div>
+        <button type="submit" class="btn-primary w-full">Abrir Lista da Partida</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ================= MODAL 3: PAGAMENTO PIX COPIA E COLA ================= -->
+  <div id="modal-pix" class="modal-backdrop hidden">
+    <div class="bento-card modal-box">
+      <div class="card-top">
+        <span class="badge-neon">PAGAMENTO PIX</span>
+        <button class="btn-ghost" onclick="closeModal('modal-pix')">✕</button>
+      </div>
+      <h2 id="pix-modal-amount" class="neon-text" style="font-size:2rem; margin:8px 0;">R$ 0,00</h2>
+      <p id="pix-modal-receiver" class="muted-text mb-10">Recebedor: ---</p>
+
+      <div class="form-group">
+        <label>Chave Pix para Transferência</label>
+        <div class="inline-form">
+          <input type="text" id="pix-modal-key" readonly />
+          <button type="button" class="btn-secondary" onclick="copyPixFromModal()">Copiar</button>
+        </div>
+      </div>
+
+      <p class="muted-text mb-20" style="font-size:0.82rem;">
+        Realize o Pix pelo app do seu banco e clique abaixo para avisar o organizador dar baixa na lista.
+      </p>
+      <button id="pix-modal-confirm-btn" class="btn-primary w-full">Já Fiz o Pix (Notificar Organizador)</button>
+    </div>
+  </div>
+
+  <!-- ================= MODAL 4: CONFIGURAÇÕES & CAIXINHA DO CLUBE ================= -->
+  <div id="modal-club-settings" class="modal-backdrop hidden">
+    <div class="bento-card modal-box">
+      <div class="card-top">
+        <h3>Configurações & Caixinha</h3>
+        <button class="btn-ghost" onclick="closeModal('modal-club-settings')">✕</button>
+      </div>
+
+      <form onsubmit="handleUpdateClubSettings(event)" class="mb-20">
+        <div class="form-group">
+          <label>Nome do Clube</label>
+          <input type="text" id="set-club-name" required />
+        </div>
+        <div class="grid-3">
+          <div class="form-group">
+            <label>Dia</label>
+            <select id="set-club-day">
+              <option value="0">Dom</option>
+              <option value="1">Seg</option>
+              <option value="2">Ter</option>
+              <option value="3">Qua</option>
+              <option value="4">Qui</option>
+              <option value="5">Sex</option>
+              <option value="6">Sáb</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Horário</label>
+            <input type="time" id="set-club-time" required />
+          </div>
+          <div class="form-group">
+            <label>Vagas</label>
+            <input type="number" id="set-club-players" min="4" required />
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="form-group">
+            <label>Por Time</label>
+            <input type="number" id="set-club-per-team" min="2" required />
+          </div>
+          <div class="form-group" style="display:flex; align-items:flex-end;">
+            <label class="checkbox-inline">
+              <input type="checkbox" id="set-club-gk-pay" /> Goleiros pagam
+            </label>
+          </div>
+        </div>
+        <button type="submit" class="btn-primary w-full">Salvar Regras do Clube</button>
+      </form>
+
+      <hr class="divider" />
+
+      <form onsubmit="handleAdjustReserve(event)">
+        <h4 class="mb-10">Movimentar Caixinha (Compra de Bola / Colete / Ajuste)</h4>
+        <div class="grid-2">
+          <div class="form-group">
+            <label>Operação</label>
+            <select id="reserve-op">
+              <option value="withdraw">Retirar (-) Gasto</option>
+              <option value="deposit">Adicionar (+) Entrada</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Valor (R$)</label>
+            <input type="number" id="reserve-amount" step="0.01" min="0.01" placeholder="50.00" required />
+          </div>
+        </div>
+        <button type="submit" class="btn-warning w-full">Atualizar Saldo da Caixinha</button>
+      </form>
+    </div>
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
