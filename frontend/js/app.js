@@ -1,6 +1,6 @@
-const API_BASE_URL = (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
+const API_URL = (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
   ? "http://localhost:5067/api"
-  : "https://peladaplay-api.onrender.com/api"; // Trocaremos pelo link real da API na Etapa 4
+  : "https://peladaplay.onrender.com/api";
 
 let token = localStorage.getItem("peladaplay_token") || null;
 let currentUser = null;
