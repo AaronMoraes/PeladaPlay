@@ -1,21 +1,25 @@
-using PeladaPlay.Domain.Enums;
-
 namespace PeladaPlay.Api.DTOs;
 
-public record CreateVenueRequest(string Name, string Address, decimal? DefaultPrice);
+public class CreateClubDto
+{
+    public string Name { get; set; } = string.Empty;
+    public Guid? DefaultVenueId { get; set; }
+    public int DefaultDayOfWeek { get; set; }
+    public string DefaultTime { get; set; } = "20:00:00";
+    public int ExpectedPlayers { get; set; } = 14;
+    public int PlayersPerTeam { get; set; } = 5;
+    public bool GoalkeepersPay { get; set; } = true;
+}
 
-public record CreateClubRequest(
-    string Name,
-    DayOfWeek DayOfWeek,
-    string StartTime,        // Ex: "20:00"
-    int DurationMinutes,     // Ex: 90
-    int ExpectedPlayers,     // Ex: 15
-    int PlayersPerTeam,      // Ex: 5
-    bool GoalkeepersPay,
-    Guid? DefaultVenueId,
-    bool CreatorIsGoalkeeper = false
-);
+public class UpdateClubDto : CreateClubDto { }
 
-public record UpdateMemberRoleRequest(ClubRole Role);
+public class JoinClubDto
+{
+    public string InviteCode { get; set; } = string.Empty;
+}
 
-public record UpdateMemberRankRequest(int SkillRank, bool IsGoalkeeper);
+public class CashReserveDto
+{
+    public decimal Amount { get; set; }
+    public string Reason { get; set; } = string.Empty;
+}

@@ -1,55 +1,57 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using PeladaPlay.Api.DTOs;
 using PeladaPlay.Domain.Entities;
 using PeladaPlay.Infrastructure.Data;
 
 namespace PeladaPlay.Api.Controllers;
 
+[Authorize]
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
 public class VenuesController : ControllerBase
 {
-    private readonly PeladaPlayDbContext _db;
+    private readonly PeladaPlayDbContext _context;
 
-    public VenuesController(PeladaPlayDbContext db)
+    public VenuesController(PeladaPlayDbContext context)
     {
-        _db = db;
+        _context = context;
     }
 
     [HttpGet]
     public async Task<IActionResult> GetAll()
     {
-        var venues = await _db.Venues
+        var venues = await _context.Venues
             .OrderBy(v => v.Name)
-            .Select(v => new
-            {
-                v.Id,
-                v.Name,
-                v.Address,
-                v.DefaultPrice,
-                IsPriceOnRequest = v.DefaultPrice == null
-            })
             .ToListAsync();
-
         return Ok(venues);
     }
 
     [HttpPost]
-    public async Task<IActionResult> Create(CreateVenueRequest req)
+    public async Task<IActionResult> Create([FromBody] CreateVenueRequest dto)
     {
+        if (string.IsNullOrWhiteSpace(dto.Name))
+            return BadRequest(new { message = "O nome da quadra/local é obrigatório." });
+
         var venue = new Venue
         {
-            Name = req.Name.Trim(),
-            Address = req.Address.Trim(),
-            DefaultPrice = req.DefaultPrice
+            Id = Guid.NewGuid(),
+            Name = dto.Name.Trim(),
+            Address = dto.Address?.Trim() ?? string.Empty,
+            DefaultPrice = dto.DefaultPrice
         };
 
-        _db.Venues.Add(venue);
-        await _db.SaveChangesAsync();
+        _context.Venues.Add(venue);
+        await _context.SaveChangesAsync();
 
-        return Ok(venue);
+        return Ok(new { message = "Quadra cadastrada com sucesso!", id = venue.Id });
     }
+}
+
+// DTO interno para evitar qualquer erro de referência ausente
+public class CreateVenueRequest
+{
+    public string Name { get; set; } = string.Empty;
+    public string Address { get; set; } = string.Empty;
+    public decimal? DefaultPrice { get; set; }
 }
