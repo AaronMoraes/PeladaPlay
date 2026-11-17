@@ -2,7 +2,6 @@ const API_BASE_URL = window.location.hostname === "localhost" || window.location
   ? "http://localhost:5000/api"
   : "https://peladaplay.onrender.com/api";
 
-
 const state = {
   token: localStorage.getItem("pp_token") || null,
   profile: null,
@@ -52,7 +51,6 @@ async function apiFetch(endpoint, options = {}, retryCount = 0) {
   try {
     res = await fetch(`${API_BASE_URL}${endpoint}`, { ...options, headers });
   } catch (networkErr) {
-    // Se o servidor gratuito do Render estiver acordando, tenta mais 1 vez automaticamente
     if (retryCount < 1) {
       showToast("Conectando ao servidor (acordando API)...");
       await new Promise(r => setTimeout(r, 3500));
@@ -224,7 +222,6 @@ async function loadProfile() {
   state.profile = me;
   state.clubs = me.clubs || [];
 
-  // Home PRO ID card
   document.getElementById("home-pro-name").textContent = me.fullName;
   document.getElementById("home-pro-shirt").textContent = `#${me.shirtNumber}`;
   document.getElementById("home-pro-meta").textContent = `${me.position} • ${FOOT_LABELS[me.preferredFoot] || "Destro"}`;
@@ -232,7 +229,6 @@ async function loadProfile() {
   document.getElementById("home-stat-goals").textContent = me.stats.goals;
   document.getElementById("home-stat-assists").textContent = me.stats.assists;
 
-  // Profile page
   document.getElementById("prof-name").textContent = me.fullName;
   document.getElementById("prof-email").textContent = me.email;
   document.getElementById("prof-shirt").textContent = `#${me.shirtNumber}`;
@@ -245,7 +241,6 @@ async function loadProfile() {
   const avatar = me.photoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(me.fullName)}&background=00F5A0&color=061014&bold=true`;
   document.getElementById("prof-avatar").src = avatar;
 
-  // Preencher formulário de edição
   document.getElementById("edit-name").value = me.fullName;
   document.getElementById("edit-position").value = me.position;
   document.getElementById("edit-foot").value = me.preferredFoot;
@@ -255,7 +250,6 @@ async function loadProfile() {
   document.getElementById("edit-photo").value = me.photoUrl || "";
   document.getElementById("edit-pix-key").value = me.pixKey || "";
 
-  // Vínculos por clube
   const clubsContainer = document.getElementById("prof-clubs-list");
   if (state.clubs.length === 0) {
     clubsContainer.innerHTML = `<p class="muted-text">Você ainda não participa de nenhum clube.</p>`;
@@ -264,7 +258,7 @@ async function loadProfile() {
       <div class="list-item">
         <div>
           <strong>${c.clubName}</strong>
-          <div class="muted-text" style="font-size:0.82rem;">Cargo: ${ROLE_LABELS[c.role]} • Nível: ${"★".repeat(c.skillRank)}</div>
+          <div class="muted-text" style="font-size:0.82rem;">Cargo: ${ROLE_LABELS[c.role]} • Nível: ${c.skillRank}.0</div>
         </div>
         <span class="badge-titanium">${ROLE_LABELS[c.role]}</span>
       </div>
@@ -338,7 +332,7 @@ async function selectClub(clubId) {
     state.currentClubDetails = club;
     state.matches = matches;
 
-    const isStaff = club.myRole >= 1; // SubOrg (1) ou Admin (2)
+    const isStaff = club.myRole >= 1;
 
     document.getElementById("club-title").textContent = club.name;
     document.getElementById("club-role-badge").textContent = ROLE_LABELS[club.myRole].toUpperCase();
@@ -485,9 +479,16 @@ function renderSquadList(club) {
   const isAdmin = club.myRole === 2;
 
   container.innerHTML = club.members.map(m => {
-    const stars = [1, 2, 3, 4, 5].map(s =>
-      `<button class="star-btn ${s <= m.skillRank ? "active" : ""}" ${!isStaff ? "disabled" : ""} onclick="updateMemberRank('${m.userId}', ${s}, ${m.isGoalkeeper})">★</button>`
+    const pips = [1, 2, 3, 4, 5].map(s =>
+      `<button class="skill-pip ${s <= m.skillRank ? "active" : ""}" ${!isStaff ? "disabled" : ""} onclick="updateMemberRank('${m.userId}', ${s}, ${m.isGoalkeeper})" title="Nível ${s}"></button>`
     ).join("");
+
+    const skillDisplay = `
+      <div style="display:flex; align-items:center;">
+        <div class="skill-container">${pips}</div>
+        <span class="skill-label">${m.skillRank}.0</span>
+      </div>
+    `;
 
     const roleSelect = isAdmin && m.userId !== state.profile.id
       ? `<select class="mini-select" onchange="updateMemberRole('${m.userId}', Number(this.value))">
@@ -503,8 +504,8 @@ function renderSquadList(club) {
           <strong>#${m.shirtNumber} ${m.fullName}</strong> ${m.isGoalkeeper ? "🧤" : ""}
           <div class="muted-text" style="font-size:0.82rem;">${m.position}</div>
         </div>
-        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-          <div>${stars}</div>
+        <div style="display:flex; gap:14px; align-items:center; flex-wrap:wrap;">
+          <div>${skillDisplay}</div>
           ${roleSelect}
         </div>
       </div>
@@ -857,7 +858,7 @@ function renderRoster(d) {
           <strong>${r.isWaitlist ? "⏳ Espera" : `#${i + 1}`} • ${r.displayName}</strong>
           ${r.isGoalkeeper ? `<span class="badge-titanium">GOL</span>` : ""}
           <div class="muted-text" style="font-size:0.82rem;">
-            ${r.isWaitlist ? "Aguardando vaga titular" : `Valor: ${formatMoney(r.amountToPay)}`} • ${"★".repeat(r.skillRank)}
+            ${r.isWaitlist ? "Aguardando vaga titular" : `Valor: ${formatMoney(r.amountToPay)}`} • ${r.skillRank}.0
           </div>
         </div>
         <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
@@ -1008,11 +1009,11 @@ function renderTeams(d) {
       <div class="team-box">
         <div class="card-top">
           <h4>${team}</h4>
-          <span class="badge-neon">${totalStars}★</span>
+          <span class="badge-neon">${totalStars}.0★</span>
         </div>
         ${players.map(p => `
           <div class="team-player-row">
-            <span>${p.displayName} ${p.isGoalkeeper ? "🧤" : ""} (${p.skillRank}★)</span>
+            <span>${p.displayName} ${p.isGoalkeeper ? "🧤" : ""} (${p.skillRank}.0)</span>
             ${isStaff ? `
               <select class="mini-select" onchange="movePlayerTeam('${p.id}', this.value)">
                 ${teams.map(t => `<option value="${t}" ${t === team ? "selected" : ""}>${t}</option>`).join("")}
