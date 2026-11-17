@@ -57,6 +57,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 
+// Configuração robusta de CORS permitindo qualquer origem, headers e métodos (incluindo preflight OPTIONS)
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll", policy =>
@@ -69,16 +70,19 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
-// CORS sempre primeiro para garantir cabeçalhos mesmo em respostas de erro
-app.UseCors("AllowAll");
-
-// Tratamento global de erros retornando JSON amigável sem quebrar o CORS
+// Tratamento global de erros para capturar qualquer exceção e retornar JSON com os headers de CORS intactos
 app.UseExceptionHandler(errorApp =>
 {
     errorApp.Run(async context =>
     {
         context.Response.StatusCode = 500;
         context.Response.ContentType = "application/json";
+        
+        // Garante que o CORS vai junto mesmo em caso de erro 500
+        context.Response.Headers.Append("Access-Control-Allow-Origin", "*");
+        context.Response.Headers.Append("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+        context.Response.Headers.Append("Access-Control-Allow-Headers", "*");
+
         await context.Response.WriteAsJsonAsync(new
         {
             message = "Ocorreu um erro interno ao processar sua solicitação. Tente novamente."
@@ -86,16 +90,21 @@ app.UseExceptionHandler(errorApp =>
     });
 });
 
+// CORS DEVE vir antes de roteamentos, autenticação e autorização
+app.UseCors("AllowAll");
+
+app.UseHttpsRedirection();
+
+app.UseAuthentication();
+app.UseAuthorization();
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
 }
 
-app.UseAuthentication();
-app.UseAuthorization();
-
-// Seed automático de quadras/campos caso o banco ainda não possua locais cadastrados
+// Seed automático de quadras/campos e execução de migrations no banco Neon
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<PeladaPlay.Infrastructure.Data.PeladaPlayDbContext>();
