@@ -1,6 +1,6 @@
 const API_BASE_URL = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
   ? "http://localhost:5000/api"
-  : "https://peladaplay-api.onrender.com/api";
+  : "https://peladaplay.onrender.com/api";
 
 const state = {
   token: localStorage.getItem("pp_token") || null,
