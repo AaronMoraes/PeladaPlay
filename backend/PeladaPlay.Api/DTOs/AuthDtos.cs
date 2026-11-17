@@ -25,7 +25,8 @@ public record AuthResponse(
     int ShirtNumber,
     string? City,
     string? Phone,
-    string? PhotoUrl
+    string? PhotoUrl,
+    string? PixKey
 );
 
 public record UpdateProfileRequest(
@@ -35,5 +36,6 @@ public record UpdateProfileRequest(
     int ShirtNumber,
     string? City,
     string? Phone,
-    string? PhotoUrl
+    string? PhotoUrl,
+    string? PixKey
 );

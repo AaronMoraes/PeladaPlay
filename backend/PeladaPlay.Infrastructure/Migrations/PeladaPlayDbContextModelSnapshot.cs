@@ -85,7 +85,7 @@ namespace PeladaPlay.Infrastructure.Migrations
                         .HasColumnType("boolean");
 
                     b.Property<DateTime>("JoinedAt")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("timestamp without time zone");
 
                     b.Property<int>("Role")
                         .HasColumnType("integer");
@@ -123,7 +123,7 @@ namespace PeladaPlay.Infrastructure.Migrations
                         .HasColumnType("boolean");
 
                     b.Property<DateTime>("MatchDateTime")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("timestamp without time zone");
 
                     b.Property<string>("PixKey")
                         .HasColumnType("text");
@@ -226,7 +226,7 @@ namespace PeladaPlay.Infrastructure.Migrations
                         .HasColumnType("integer");
 
                     b.Property<DateTime>("RegisteredAt")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("timestamp without time zone");
 
                     b.Property<string>("TeamAssigned")
                         .HasColumnType("text");
@@ -253,7 +253,7 @@ namespace PeladaPlay.Infrastructure.Migrations
                         .HasColumnType("text");
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("timestamp without time zone");
 
                     b.Property<string>("Email")
                         .IsRequired()
@@ -273,6 +273,9 @@ namespace PeladaPlay.Infrastructure.Migrations
                         .HasColumnType("text");
 
                     b.Property<string>("PhotoUrl")
+                        .HasColumnType("text");
+
+                    b.Property<string>("PixKey")
                         .HasColumnType("text");
 
                     b.Property<string>("Position")

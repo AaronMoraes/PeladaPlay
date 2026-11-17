@@ -93,6 +93,7 @@ public class AuthController : ControllerBase
             user.City,
             user.Phone,
             user.PhotoUrl,
+            user.PixKey,
             Stats = new
             {
                 Matches = validatedMatches,
@@ -128,6 +129,7 @@ public class AuthController : ControllerBase
         user.City = req.City;
         user.Phone = req.Phone;
         user.PhotoUrl = req.PhotoUrl;
+        user.PixKey = string.IsNullOrWhiteSpace(req.PixKey) ? null : req.PixKey.Trim();
 
         await _db.SaveChangesAsync();
         return Ok(new { message = "Perfil atualizado com sucesso!" });
@@ -143,5 +145,5 @@ public class AuthController : ControllerBase
     }
 
     private static AuthResponse MapToResponse(User u, string token) =>
-        new(token, u.Id, u.FullName, u.Email, u.Position, u.PreferredFoot, u.ShirtNumber, u.City, u.Phone, u.PhotoUrl);
+        new(token, u.Id, u.FullName, u.Email, u.Position, u.PreferredFoot, u.ShirtNumber, u.City, u.Phone, u.PhotoUrl, u.PixKey);
 }

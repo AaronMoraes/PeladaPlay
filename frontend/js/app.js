@@ -1,147 +1,105 @@
-const API_URL = (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
-  ? "http://localhost:5067/api"
-  : "https://peladaplay.onrender.com/api";
+const API_BASE_URL = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+  ? "http://localhost:5000/api"
+  : "https://peladaplay-api.onrender.com/api";
 
-let token = localStorage.getItem("peladaplay_token") || null;
-let currentUser = null;
-let myClubs = [];
-let cachedVenues = [];
-let selectedClubId = localStorage.getItem("peladaplay_club") || null;
-let currentClubDetails = null;
-let currentMatch = null;
-let countdownTimer = null;
-let toastTimeout = null;
+const state = {
+  token: localStorage.getItem("pp_token") || null,
+  profile: null,
+  clubs: [],
+  currentClubId: localStorage.getItem("pp_club_id") || null,
+  currentClubDetails: null,
+  matches: [],
+  currentMatchId: null,
+  currentMatchDetails: null,
+  venues: [],
+  countdownTimer: null
+};
 
-const DAYS = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"];
-const FEET = ["Destro", "Canhoto", "Ambidestro"];
-const ROLES = ["Jogador", "Sub-Organizador", "Organizador (Admin)"];
-const PAYMENT_LABELS = ["Pendente", "Aguardando Baixa", "Pago ✓", "Isento"];
+const FOOT_LABELS = ["Destro", "Canhoto", "Ambidestro"];
+const ROLE_LABELS = ["Jogador", "Sub-Organizador", "Organizador"];
+const DAY_LABELS = ["Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado"];
 
+// ================= INICIALIZAÇÃO & SERVICE WORKER =================
 document.addEventListener("DOMContentLoaded", () => {
-  if (token) loadDashboard();
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("./sw.js").catch(() => {});
+  }
+
+  if (state.token) {
+    bootApp();
+  } else {
+    showAuth();
+  }
 });
 
-function showToast(msg, duration = 4000) {
+// ================= HELPERS HTTP & UI =================
+function showToast(msg, isError = false) {
   const el = document.getElementById("toast");
-  if (!el) return;
   el.textContent = msg;
-  el.classList.remove("hidden");
-  if (toastTimeout) clearTimeout(toastTimeout);
-  toastTimeout = setTimeout(() => el.classList.add("hidden"), duration);
+  el.className = `toast ${isError ? "error" : ""}`;
+  setTimeout(() => el.classList.add("hidden"), 4000);
 }
 
-function getFriendlyHttpError(status, data) {
-  if (data) {
-    if (typeof data === "string" && data.trim()) return data;
-    if (data.message) return data.message;
-    if (data.errors) {
-      const firstKey = Object.keys(data.errors)[0];
-      if (firstKey && data.errors[firstKey]?.length) {
-        return data.errors[firstKey][0];
-      }
-    }
-    if (data.title && status === 400) return "Verifique os dados preenchidos e tente novamente.";
-  }
-
-  switch (status) {
-    case 400: return "Dados inválidos. Confira as informações preenchidas.";
-    case 401: return "Sua sessão expirou. Entre novamente na sua conta.";
-    case 403: return "Você não tem permissão de organizador para realizar esta ação.";
-    case 404: return "O registro solicitado não foi encontrado ou já foi removido.";
-    case 409: return "Este registro já existe ou está em conflito.";
-    case 429: return "Muitas tentativas seguidas. Aguarde alguns segundos.";
-    case 500:
-    case 502:
-    case 503:
-    case 504:
-      return "O servidor está passando por uma instabilidade momentânea. Tente novamente em instantes.";
-    default:
-      return "Não foi possível concluir a operação. Tente novamente.";
-  }
-}
-
-async function apiFetch(endpoint, options = {}) {
-  const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-
-  const executeRequest = async () => {
-    const res = await fetch(`${API_URL}${endpoint}`, { ...options, headers });
-
-    if (res.status === 401) {
-      logout();
-      throw new Error("Sua sessão expirou. Faça login novamente.");
-    }
-
-    const rawText = await res.text();
-    let data = {};
-    try {
-      data = rawText ? JSON.parse(rawText) : {};
-    } catch {
-      data = rawText;
-    }
-
-    if (!res.ok) {
-      throw new Error(getFriendlyHttpError(res.status, data));
-    }
-
-    return data;
+async function apiFetch(endpoint, options = {}, retryCount = 0) {
+  const headers = {
+    "Content-Type": "application/json",
+    ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}),
+    ...(options.headers || {})
   };
 
+  let res;
   try {
-    return await executeRequest();
-  } catch (err) {
-    const isNetworkOrColdStart =
-      err instanceof TypeError ||
-      err.message === "Load failed" ||
-      err.message === "Failed to fetch" ||
-      err.message.includes("NetworkError");
-
-    if (isNetworkOrColdStart) {
-      if (!navigator.onLine) {
-        throw new Error("Você está sem conexão com a internet. Verifique seu Wi-Fi ou 4G/5G.");
-      }
-
-      showToast("Conectando ao servidor... Aguarde um instante.", 4500);
-      await new Promise(resolve => setTimeout(resolve, 3500));
-
-      try {
-        return await executeRequest();
-      } catch (retryErr) {
-        if (
-          retryErr instanceof TypeError ||
-          retryErr.message === "Load failed" ||
-          retryErr.message === "Failed to fetch"
-        ) {
-          throw new Error("O servidor está acordando. Toque novamente em alguns segundos.");
-        }
-        throw retryErr;
-      }
+    res = await fetch(`${API_BASE_URL}${endpoint}`, { ...options, headers });
+  } catch (networkErr) {
+    // Se o servidor gratuito do Render estiver acordando, tenta mais 1 vez automaticamente
+    if (retryCount < 1) {
+      showToast("Conectando ao servidor (acordando API)...");
+      await new Promise(r => setTimeout(r, 3500));
+      return apiFetch(endpoint, options, retryCount + 1);
     }
-
-    throw err;
+    throw new Error("Não foi possível conectar ao servidor. Aguarde alguns segundos e tente novamente.");
   }
+
+  if (res.status === 401) {
+    logout();
+    throw new Error("Sessão expirada. Faça login novamente.");
+  }
+
+  if (res.status === 403) {
+    throw new Error("Você não tem permissão para esta ação.");
+  }
+
+  const text = await res.text();
+  let data = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { message: text };
+    }
+  }
+
+  if (!res.ok) {
+    throw new Error(data?.message || `Erro HTTP ${res.status}`);
+  }
+  return data;
 }
 
-// ================= NAVEGAÇÃO ENTRE ABAS =================
-async function navigateTo(page) {
-  document.querySelectorAll(".page-section").forEach(sec => sec.classList.add("hidden"));
-  document.getElementById(`page-${page}`).classList.remove("hidden");
-
-  document.querySelectorAll(".nav-item").forEach(btn => {
-    btn.classList.toggle("active", btn.dataset.page === page);
-  });
-
-  try {
-    if (page === "squad" && selectedClubId) await loadClubSquad(selectedClubId);
-    if (page === "rankings" && selectedClubId) await loadClubRankings(selectedClubId);
-    if (page === "venues") await loadVenues();
-    if (page === "profile") renderProfilePage();
-  } catch (err) {
-    showToast(err.message);
-  }
+function formatMoney(val) {
+  return Number(val || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
-// ================= AUTENTICAÇÃO =================
+function formatDateTime(iso) {
+  const d = new Date(iso);
+  return d.toLocaleDateString("pt-BR", { weekday: "short", day: "2-digit", month: "2-digit" }) +
+    " às " + d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+}
+
+function showAuth() {
+  document.getElementById("auth-view").classList.remove("hidden");
+  document.getElementById("app-view").classList.add("hidden");
+}
+
 function switchAuthTab(tab) {
   document.getElementById("tab-login").classList.toggle("active", tab === "login");
   document.getElementById("tab-register").classList.toggle("active", tab === "register");
@@ -149,205 +107,327 @@ function switchAuthTab(tab) {
   document.getElementById("register-form").classList.toggle("hidden", tab !== "register");
 }
 
+function openModal(id) {
+  document.getElementById(id).classList.remove("hidden");
+}
+
+function closeModal(id) {
+  document.getElementById(id).classList.add("hidden");
+}
+
+function navigateTo(pageId) {
+  document.querySelectorAll(".page-section").forEach(sec => sec.classList.add("hidden"));
+  document.querySelectorAll(".nav-item").forEach(btn => btn.classList.remove("active"));
+
+  const target = document.getElementById(`page-${pageId}`);
+  if (target) target.classList.remove("hidden");
+
+  const navBtn = document.querySelector(`.nav-item[data-page="${pageId}"]`);
+  if (navBtn) navBtn.classList.add("active");
+}
+
+// ================= AUTENTICAÇÃO =================
+function saveCredentialsInBrowser(email, password, name) {
+  try {
+    if (window.PasswordCredential && navigator.credentials) {
+      const cred = new window.PasswordCredential({
+        id: email,
+        password: password,
+        name: name || email
+      });
+      navigator.credentials.store(cred).catch(() => {});
+    }
+  } catch {}
+}
+
 async function handleLogin(e) {
   e.preventDefault();
   try {
+    const email = document.getElementById("login-email").value.trim();
+    const password = document.getElementById("login-password").value;
     const res = await apiFetch("/Auth/login", {
       method: "POST",
-      body: JSON.stringify({
-        email: document.getElementById("login-email").value.trim(),
-        password: document.getElementById("login-password").value
-      })
+      body: JSON.stringify({ email, password })
     });
-    token = res.token;
-    localStorage.setItem("peladaplay_token", token);
-    showToast(`Bem-vindo, ${res.fullName}!`);
-    await loadDashboard();
+    saveCredentialsInBrowser(email, password, res.fullName);
+    state.token = res.token;
+    localStorage.setItem("pp_token", res.token);
+    await bootApp();
   } catch (err) {
-    showToast(err.message);
+    showToast(err.message, true);
   }
 }
 
 async function handleRegister(e) {
   e.preventDefault();
   try {
+    const email = document.getElementById("reg-email").value.trim();
+    const password = document.getElementById("reg-password").value;
+    const payload = {
+      fullName: document.getElementById("reg-name").value,
+      email,
+      password,
+      position: document.getElementById("reg-position").value,
+      preferredFoot: Number(document.getElementById("reg-foot").value),
+      shirtNumber: Number(document.getElementById("reg-shirt").value),
+      city: null,
+      phone: null
+    };
     const res = await apiFetch("/Auth/register", {
       method: "POST",
-      body: JSON.stringify({
-        fullName: document.getElementById("reg-name").value.trim(),
-        email: document.getElementById("reg-email").value.trim(),
-        password: document.getElementById("reg-password").value,
-        position: document.getElementById("reg-position").value,
-        preferredFoot: Number(document.getElementById("reg-foot").value),
-        shirtNumber: Number(document.getElementById("reg-shirt").value)
-      })
+      body: JSON.stringify(payload)
     });
-    token = res.token;
-    localStorage.setItem("peladaplay_token", token);
-    showToast("PRO ID criado com sucesso!");
-    await loadDashboard();
+    saveCredentialsInBrowser(email, password, payload.fullName);
+    state.token = res.token;
+    localStorage.setItem("pp_token", res.token);
+    showToast("PRO ID gerado com sucesso!");
+    await bootApp();
   } catch (err) {
-    showToast(err.message);
+    showToast(err.message, true);
   }
 }
 
 function logout() {
-  token = null;
-  localStorage.removeItem("peladaplay_token");
-  document.getElementById("app-view").classList.add("hidden");
-  document.getElementById("auth-view").classList.remove("hidden");
+  state.token = null;
+  state.profile = null;
+  if (state.countdownTimer) clearInterval(state.countdownTimer);
+  localStorage.removeItem("pp_token");
+  localStorage.removeItem("pp_club_id");
+  showAuth();
 }
 
-// ================= DASHBOARD & CLUBES =================
-async function loadDashboard() {
+// ================= BOOT DO APP =================
+async function bootApp() {
+  document.getElementById("auth-view").classList.add("hidden");
+  document.getElementById("app-view").classList.remove("hidden");
+
   try {
-    document.getElementById("auth-view").classList.add("hidden");
-    document.getElementById("app-view").classList.remove("hidden");
+    await Promise.all([loadProfile(), loadVenues()]);
+    renderClubSelector();
 
-    currentUser = await apiFetch("/Auth/me");
-    renderProfileSummary();
-    renderProfilePage();
-
-    cachedVenues = await apiFetch("/Venues");
-    myClubs = await apiFetch("/Clubs/my");
-
-    const selector = document.getElementById("club-selector");
-    selector.innerHTML = myClubs.length
-      ? myClubs.map(c => `<option value="${c.id}">${c.name}</option>`).join("")
-      : `<option value="">Nenhum clube ainda</option>`;
-
-    if (myClubs.length > 0) {
-      const validClub = myClubs.find(c => c.id === selectedClubId) ? selectedClubId : myClubs[0].id;
-      selector.value = validClub;
-      await selectClub(validClub);
+    if (state.clubs.length > 0) {
+      const validId = state.clubs.some(c => c.clubId === state.currentClubId)
+        ? state.currentClubId
+        : state.clubs[0].clubId;
+      await selectClub(validId);
+    } else {
+      renderEmptyClubState();
     }
   } catch (err) {
-    showToast(err.message);
+    showToast(err.message, true);
   }
 }
 
-function renderProfileSummary() {
-  document.getElementById("home-pro-name").textContent = currentUser.fullName;
-  document.getElementById("home-pro-shirt").textContent = `#${currentUser.shirtNumber}`;
-  document.getElementById("home-pro-meta").textContent = `${currentUser.position} • ${FEET[currentUser.preferredFoot]}`;
-  document.getElementById("home-stat-matches").textContent = currentUser.stats.matches;
-  document.getElementById("home-stat-goals").textContent = currentUser.stats.goals;
-  document.getElementById("home-stat-assists").textContent = currentUser.stats.assists;
+async function loadProfile() {
+  const me = await apiFetch("/Auth/me");
+  state.profile = me;
+  state.clubs = me.clubs || [];
+
+  // Home PRO ID card
+  document.getElementById("home-pro-name").textContent = me.fullName;
+  document.getElementById("home-pro-shirt").textContent = `#${me.shirtNumber}`;
+  document.getElementById("home-pro-meta").textContent = `${me.position} • ${FOOT_LABELS[me.preferredFoot] || "Destro"}`;
+  document.getElementById("home-stat-matches").textContent = me.stats.matches;
+  document.getElementById("home-stat-goals").textContent = me.stats.goals;
+  document.getElementById("home-stat-assists").textContent = me.stats.assists;
+
+  // Profile page
+  document.getElementById("prof-name").textContent = me.fullName;
+  document.getElementById("prof-email").textContent = me.email;
+  document.getElementById("prof-shirt").textContent = `#${me.shirtNumber}`;
+  document.getElementById("prof-meta").textContent = `${me.position} • ${FOOT_LABELS[me.preferredFoot] || "Destro"} • ${me.city || "Brasil"}`;
+  document.getElementById("prof-stat-matches").textContent = me.stats.matches;
+  document.getElementById("prof-stat-goals").textContent = me.stats.goals;
+  document.getElementById("prof-stat-assists").textContent = me.stats.assists;
+  document.getElementById("prof-stat-avg").textContent = me.stats.contributionsPerGame;
+
+  const avatar = me.photoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(me.fullName)}&background=00F5A0&color=061014&bold=true`;
+  document.getElementById("prof-avatar").src = avatar;
+
+  // Preencher formulário de edição
+  document.getElementById("edit-name").value = me.fullName;
+  document.getElementById("edit-position").value = me.position;
+  document.getElementById("edit-foot").value = me.preferredFoot;
+  document.getElementById("edit-shirt").value = me.shirtNumber;
+  document.getElementById("edit-city").value = me.city || "";
+  document.getElementById("edit-phone").value = me.phone || "";
+  document.getElementById("edit-photo").value = me.photoUrl || "";
+  document.getElementById("edit-pix-key").value = me.pixKey || "";
+
+  // Vínculos por clube
+  const clubsContainer = document.getElementById("prof-clubs-list");
+  if (state.clubs.length === 0) {
+    clubsContainer.innerHTML = `<p class="muted-text">Você ainda não participa de nenhum clube.</p>`;
+  } else {
+    clubsContainer.innerHTML = state.clubs.map(c => `
+      <div class="list-item">
+        <div>
+          <strong>${c.clubName}</strong>
+          <div class="muted-text" style="font-size:0.82rem;">Cargo: ${ROLE_LABELS[c.role]} • Nível: ${"★".repeat(c.skillRank)}</div>
+        </div>
+        <span class="badge-titanium">${ROLE_LABELS[c.role]}</span>
+      </div>
+    `).join("");
+  }
+}
+
+async function handleUpdateProfile(e) {
+  e.preventDefault();
+  try {
+    const payload = {
+      fullName: document.getElementById("edit-name").value,
+      position: document.getElementById("edit-position").value,
+      preferredFoot: Number(document.getElementById("edit-foot").value),
+      shirtNumber: Number(document.getElementById("edit-shirt").value),
+      city: document.getElementById("edit-city").value || null,
+      phone: document.getElementById("edit-phone").value || null,
+      photoUrl: document.getElementById("edit-photo").value || null,
+      pixKey: document.getElementById("edit-pix-key").value || null
+    };
+    const res = await apiFetch("/Auth/me", { method: "PUT", body: JSON.stringify(payload) });
+    showToast(res.message);
+    await loadProfile();
+  } catch (err) {
+    showToast(err.message, true);
+  }
+}
+
+// ================= CLUBES & ELENCO =================
+function renderClubSelector() {
+  const sel = document.getElementById("club-selector");
+  if (state.clubs.length === 0) {
+    sel.innerHTML = `<option value="">Nenhum clube ainda...</option>`;
+    return;
+  }
+  sel.innerHTML = state.clubs.map(c =>
+    `<option value="${c.clubId}">${c.clubName} (${ROLE_LABELS[c.role]})</option>`
+  ).join("");
+  if (state.currentClubId) sel.value = state.currentClubId;
+}
+
+function renderEmptyClubState() {
+  document.getElementById("club-title").textContent = "Bem-vindo ao PeladaPlay!";
+  document.getElementById("club-schedule").textContent = "Clique em '+ Clube / Convite' no topo para criar sua pelada ou entrar com um código.";
+  document.getElementById("club-role-badge").textContent = "SEM CLUBE";
+  document.getElementById("club-invite-code").textContent = "---";
+  document.getElementById("club-reserve").textContent = "R$ 0,00";
+  document.getElementById("btn-new-match-home").classList.add("hidden");
+  document.getElementById("btn-quick-next-match").classList.add("hidden");
+  document.getElementById("btn-new-match-page").classList.add("hidden");
+  document.getElementById("btn-quick-next-match-page").classList.add("hidden");
+  document.getElementById("btn-club-settings").classList.add("hidden");
+  document.getElementById("matches-list").innerHTML = `<p class="muted-text">Entre ou crie um clube primeiro.</p>`;
+  document.getElementById("squad-list").innerHTML = "";
+  document.getElementById("rankings-list").innerHTML = "";
 }
 
 async function selectClub(clubId) {
   if (!clubId) return;
-  try {
-    selectedClubId = clubId;
-    localStorage.setItem("peladaplay_club", clubId);
-    document.getElementById("match-detail-panel").classList.add("hidden");
+  state.currentClubId = clubId;
+  localStorage.setItem("pp_club_id", clubId);
+  document.getElementById("club-selector").value = clubId;
 
-    const club = myClubs.find(c => c.id === clubId);
-    if (!club) return;
+  try {
+    const [club, matches, rankings] = await Promise.all([
+      apiFetch(`/Clubs/${clubId}`),
+      apiFetch(`/Matches/club/${clubId}`),
+      apiFetch(`/Matches/club/${clubId}/rankings`)
+    ]);
+
+    state.currentClubDetails = club;
+    state.matches = matches;
+
+    const isStaff = club.myRole >= 1; // SubOrg (1) ou Admin (2)
 
     document.getElementById("club-title").textContent = club.name;
-    document.getElementById("club-role-badge").textContent = ROLES[club.myRole].toUpperCase();
-    document.getElementById("club-invite-code").textContent = `CONVITE: ${club.inviteCode}`;
+    document.getElementById("club-role-badge").textContent = ROLE_LABELS[club.myRole].toUpperCase();
+    document.getElementById("club-invite-code").textContent = `CÓD: ${club.inviteCode}`;
+    document.getElementById("club-reserve").textContent = formatMoney(club.cashReserve);
+
+    const venueTxt = club.defaultVenue ? ` • ${club.defaultVenue.name}` : "";
     document.getElementById("club-schedule").textContent =
-      `${DAYS[club.dayOfWeek]} às ${club.startTime} • ${club.expectedPlayers} vagas (${club.playersPerTeam}x${club.playersPerTeam})` +
-      (club.defaultVenue ? ` • 📍 ${club.defaultVenue.name}` : "");
-    document.getElementById("club-reserve").textContent = `R$ ${Number(club.cashReserve).toFixed(2)}`;
+      `Toda ${DAY_LABELS[club.defaultDayOfWeek]} às ${club.defaultTime.slice(0, 5)} • ${club.expectedPlayers} vagas${venueTxt}`;
 
-    const canManage = club.myRole >= 1;
-    const isAdmin = club.myRole === 2;
-    const dayLabel = DAYS[club.dayOfWeek];
+    document.getElementById("btn-new-match-home").classList.toggle("hidden", !isStaff);
+    document.getElementById("btn-quick-next-match").classList.toggle("hidden", !isStaff);
+    document.getElementById("btn-new-match-page").classList.toggle("hidden", !isStaff);
+    document.getElementById("btn-quick-next-match-page").classList.toggle("hidden", !isStaff);
+    document.getElementById("btn-club-settings").classList.toggle("hidden", !isStaff);
 
-    const quickHomeBtn = document.getElementById("btn-quick-next-match");
-    const quickPageBtn = document.getElementById("btn-quick-next-match-page");
-    quickHomeBtn.textContent = `⚡ Agendar ${dayLabel} (${club.startTime})`;
-    quickPageBtn.textContent = `⚡ Agendar ${dayLabel} (${club.startTime})`;
+    renderMatchesList(matches);
+    renderHomeNextMatch(matches);
+    renderSquadList(club);
+    renderRankingsList(rankings);
 
-    quickHomeBtn.classList.toggle("hidden", !canManage);
-    quickPageBtn.classList.toggle("hidden", !canManage);
-    document.getElementById("btn-new-match-home").classList.toggle("hidden", !canManage);
-    document.getElementById("btn-new-match-page").classList.toggle("hidden", !canManage);
-    document.getElementById("btn-club-settings").classList.toggle("hidden", !isAdmin);
-
-    await loadClubMatches(clubId);
+    if (matches.length > 0) {
+      const keepId = matches.some(m => m.id === state.currentMatchId) ? state.currentMatchId : matches[0].id;
+      await openMatchDetail(keepId);
+    } else {
+      document.getElementById("match-detail-panel").classList.add("hidden");
+    }
   } catch (err) {
-    showToast(err.message);
+    showToast(err.message, true);
   }
 }
 
 function copyInviteCode() {
-  const club = myClubs.find(c => c.id === selectedClubId);
-  if (!club) return;
-  navigator.clipboard.writeText(club.inviteCode)
-    .then(() => showToast(`Código ${club.inviteCode} copiado!`))
-    .catch(() => showToast("Não foi possível copiar automaticamente. Copie manualmente."));
+  if (!state.currentClubDetails) return;
+  navigator.clipboard.writeText(state.currentClubDetails.inviteCode);
+  showToast(`Código ${state.currentClubDetails.inviteCode} copiado!`);
 }
 
-async function openClubModal() {
-  try {
-    cachedVenues = await apiFetch("/Venues");
-    const select = document.getElementById("new-club-venue");
-    select.innerHTML = `<option value="">Sem quadra fixa</option>` +
-      cachedVenues.map(v => `<option value="${v.id}">${v.name}</option>`).join("");
-    openModal("modal-club");
-  } catch (err) {
-    showToast(err.message);
-  }
+function openClubModal() {
+  const sel = document.getElementById("new-club-venue");
+  sel.innerHTML = `<option value="">Sem quadra fixa</option>` +
+    state.venues.map(v => `<option value="${v.id}">${v.name} ${v.defaultPrice ? `(${formatMoney(v.defaultPrice)})` : "(Sob consulta)"}</option>`).join("");
+  openModal("modal-club");
 }
 
 async function handleCreateClub(e) {
   e.preventDefault();
-  const venueId = document.getElementById("new-club-venue").value || null;
   try {
-    const res = await apiFetch("/Clubs", {
-      method: "POST",
-      body: JSON.stringify({
-        name: document.getElementById("new-club-name").value.trim(),
-        dayOfWeek: Number(document.getElementById("new-club-day").value),
-        startTime: document.getElementById("new-club-time").value,
-        durationMinutes: 90,
-        expectedPlayers: Number(document.getElementById("new-club-players").value),
-        playersPerTeam: Number(document.getElementById("new-club-per-team").value),
-        goalkeepersPay: document.getElementById("new-club-gk-pay").checked,
-        defaultVenueId: venueId
-      })
-    });
+    const venueVal = document.getElementById("new-club-venue").value;
+    const payload = {
+      name: document.getElementById("new-club-name").value,
+      defaultVenueId: venueVal || null,
+      defaultDayOfWeek: Number(document.getElementById("new-club-day").value),
+      defaultTime: document.getElementById("new-club-time").value + ":00",
+      expectedPlayers: Number(document.getElementById("new-club-players").value),
+      playersPerTeam: Number(document.getElementById("new-club-per-team").value),
+      goalkeepersPay: document.getElementById("new-club-gk-pay").checked
+    };
+    const res = await apiFetch("/Clubs", { method: "POST", body: JSON.stringify(payload) });
     closeModal("modal-club");
-    selectedClubId = res.id;
-    showToast(`Clube "${res.name}" criado! Código: ${res.inviteCode}`);
-    await loadDashboard();
+    showToast("Clube criado! Você é o Organizador.");
+    await loadProfile();
+    renderClubSelector();
+    await selectClub(res.id);
   } catch (err) {
-    showToast(err.message);
+    showToast(err.message, true);
   }
 }
 
 async function handleJoinClub(e) {
   e.preventDefault();
   try {
-    const code = document.getElementById("invite-code-input").value.trim();
-    if (!code) {
-      showToast("Digite o código de convite do clube.");
-      return;
-    }
-    const res = await apiFetch(`/Clubs/join/${encodeURIComponent(code)}`, { method: "POST" });
+    const inviteCode = document.getElementById("invite-code-input").value.trim();
+    const res = await apiFetch("/Clubs/join", { method: "POST", body: JSON.stringify({ inviteCode }) });
     closeModal("modal-club");
-    selectedClubId = res.id;
     showToast(res.message);
-    await loadDashboard();
+    await loadProfile();
+    renderClubSelector();
+    await selectClub(res.clubId);
   } catch (err) {
-    showToast(err.message);
+    showToast(err.message, true);
   }
 }
 
-// ================= CONFIGURAÇÕES & CAIXINHA DO CLUBE =================
 function openClubSettingsModal() {
-  const club = myClubs.find(c => c.id === selectedClubId);
-  if (!club) {
-    showToast("Selecione um clube primeiro.");
-    return;
-  }
+  const club = state.currentClubDetails;
+  if (!club) return;
   document.getElementById("set-club-name").value = club.name;
-  document.getElementById("set-club-day").value = club.dayOfWeek;
-  document.getElementById("set-club-time").value = club.startTime;
+  document.getElementById("set-club-day").value = club.defaultDayOfWeek;
+  document.getElementById("set-club-time").value = club.defaultTime.slice(0, 5);
   document.getElementById("set-club-players").value = club.expectedPlayers;
   document.getElementById("set-club-per-team").value = club.playersPerTeam;
   document.getElementById("set-club-gk-pay").checked = club.goalkeepersPay;
@@ -357,275 +437,444 @@ function openClubSettingsModal() {
 async function handleUpdateClubSettings(e) {
   e.preventDefault();
   try {
-    const res = await apiFetch(`/Clubs/${selectedClubId}`, {
-      method: "PUT",
-      body: JSON.stringify({
-        name: document.getElementById("set-club-name").value.trim(),
-        dayOfWeek: Number(document.getElementById("set-club-day").value),
-        startTime: document.getElementById("set-club-time").value,
-        expectedPlayers: Number(document.getElementById("set-club-players").value),
-        playersPerTeam: Number(document.getElementById("set-club-per-team").value),
-        goalkeepersPay: document.getElementById("set-club-gk-pay").checked
-      })
-    });
+    const club = state.currentClubDetails;
+    const payload = {
+      name: document.getElementById("set-club-name").value,
+      defaultVenueId: club.defaultVenue?.id || null,
+      defaultDayOfWeek: Number(document.getElementById("set-club-day").value),
+      defaultTime: document.getElementById("set-club-time").value + ":00",
+      expectedPlayers: Number(document.getElementById("set-club-players").value),
+      playersPerTeam: Number(document.getElementById("set-club-per-team").value),
+      goalkeepersPay: document.getElementById("set-club-gk-pay").checked
+    };
+    const res = await apiFetch(`/Clubs/${club.id}`, { method: "PUT", body: JSON.stringify(payload) });
     closeModal("modal-club-settings");
     showToast(res.message);
-    await loadDashboard();
+    await selectClub(club.id);
   } catch (err) {
-    showToast(err.message);
+    showToast(err.message, true);
   }
 }
 
 async function handleAdjustReserve(e) {
   e.preventDefault();
-  const op = document.getElementById("reserve-op").value;
-  const amount = Number(document.getElementById("reserve-amount").value);
-  if (amount <= 0) {
-    showToast("Informe um valor maior que zero.");
-    return;
-  }
-  const delta = op === "withdraw" ? -amount : amount;
   try {
-    const res = await apiFetch(`/Clubs/${selectedClubId}/cash-reserve`, {
+    const op = document.getElementById("reserve-op").value;
+    const rawAmount = Number(document.getElementById("reserve-amount").value);
+    const amount = op === "withdraw" ? -Math.abs(rawAmount) : Math.abs(rawAmount);
+
+    const res = await apiFetch(`/Clubs/${state.currentClubId}/cash-reserve`, {
       method: "PATCH",
-      body: JSON.stringify({ delta })
+      body: JSON.stringify({ amount, reason: "Ajuste manual" })
     });
     document.getElementById("reserve-amount").value = "";
     closeModal("modal-club-settings");
     showToast(res.message);
-    await loadDashboard();
+    await selectClub(state.currentClubId);
   } catch (err) {
-    showToast(err.message);
+    showToast(err.message, true);
   }
 }
 
-// ================= PARTIDAS, RECORRÊNCIA & PIX =================
-async function loadClubMatches(clubId) {
-  const matches = await apiFetch(`/Matches/club/${clubId}`);
-  const container = document.getElementById("matches-list");
-  const homeHighlight = document.getElementById("home-next-match");
+function renderSquadList(club) {
+  const container = document.getElementById("squad-list");
+  document.getElementById("squad-count-badge").textContent = `${club.members.length} atletas`;
+  const isStaff = club.myRole >= 1;
+  const isAdmin = club.myRole === 2;
 
-  if (!matches.length) {
-    container.innerHTML = `<p class="muted-text">Nenhuma partida agendada neste clube ainda.</p>`;
-    homeHighlight.innerHTML = `<p class="muted-text">Nenhuma partida agendada para este clube.</p>`;
-    return;
-  }
+  container.innerHTML = club.members.map(m => {
+    const stars = [1, 2, 3, 4, 5].map(s =>
+      `<button class="star-btn ${s <= m.skillRank ? "active" : ""}" ${!isStaff ? "disabled" : ""} onclick="updateMemberRank('${m.userId}', ${s}, ${m.isGoalkeeper})">★</button>`
+    ).join("");
 
-  const next = matches[0];
-  const nextDt = new Date(next.matchDateTime).toLocaleString("pt-BR", { dateStyle: "full", timeStyle: "short" });
-  const nextStatus = next.status === 0 ? "Lista Aberta" : next.status === 1 ? "Pix Aberto (24h)" : "Finalizada";
-  homeHighlight.innerHTML = `
-    <div class="roster-row">
-      <div>
-        <span class="badge-neon">${nextStatus}</span>
-        <h4 style="margin-top:6px;">${nextDt}</h4>
-        <p class="muted-text">${next.confirmedCount} confirmados • ${next.waitlistCount} espera • Quadra R$ ${Number(next.courtCost).toFixed(2)}</p>
-      </div>
-      <button class="btn-primary" onclick="goToMatchFromHome('${next.id}')">Abrir Lista & Pix</button>
-    </div>
-  `;
+    const roleSelect = isAdmin && m.userId !== state.profile.id
+      ? `<select class="mini-select" onchange="updateMemberRole('${m.userId}', Number(this.value))">
+          <option value="0" ${m.role === 0 ? "selected" : ""}>Jogador</option>
+          <option value="1" ${m.role === 1 ? "selected" : ""}>Sub-Org</option>
+          <option value="2" ${m.role === 2 ? "selected" : ""}>Admin</option>
+         </select>`
+      : `<span class="badge-titanium">${ROLE_LABELS[m.role]}</span>`;
 
-  container.innerHTML = matches.map(m => {
-    const dt = new Date(m.matchDateTime).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
-    const statusText = m.status === 0 ? "Lista Aberta" : m.status === 1 ? "Pix Aberto" : "Finalizada";
     return `
-      <div class="match-item" onclick="openMatchDetails('${m.id}')">
-        <div class="card-top">
-          <span class="badge-neon">${statusText}</span>
-          <span class="mono-tag">R$ ${Number(m.courtCost).toFixed(2)}</span>
+      <div class="list-item">
+        <div>
+          <strong>#${m.shirtNumber} ${m.fullName}</strong> ${m.isGoalkeeper ? "🧤" : ""}
+          <div class="muted-text" style="font-size:0.82rem;">${m.position}</div>
         </div>
-        <h4>${dt}</h4>
-        <p class="muted-text">${m.confirmedCount} confirmados • ${m.waitlistCount} espera • ${m.paidCount} pagos</p>
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+          <div>${stars}</div>
+          ${roleSelect}
+        </div>
       </div>
     `;
   }).join("");
 }
 
-async function goToMatchFromHome(matchId) {
-  await navigateTo("matches");
-  await openMatchDetails(matchId);
+async function updateMemberRank(userId, skillRank, isGoalkeeper) {
+  try {
+    await apiFetch(`/Clubs/${state.currentClubId}/members/${userId}/rank`, {
+      method: "PATCH",
+      body: JSON.stringify({ skillRank, isGoalkeeper })
+    });
+    showToast("Nível técnico atualizado!");
+    await selectClub(state.currentClubId);
+  } catch (err) {
+    showToast(err.message, true);
+  }
 }
 
-function getNextClubOccurrenceISO(club) {
-  const now = new Date();
-  const [hours, minutes] = club.startTime.split(":").map(Number);
-  const target = new Date(now);
-  target.setHours(hours, minutes, 0, 0);
+async function updateMemberRole(userId, role) {
+  try {
+    await apiFetch(`/Clubs/${state.currentClubId}/members/${userId}/role`, {
+      method: "PATCH",
+      body: JSON.stringify({ role })
+    });
+    showToast("Cargo atualizado com sucesso!");
+    await selectClub(state.currentClubId);
+  } catch (err) {
+    showToast(err.message, true);
+  }
+}
 
-  let diffDays = (club.dayOfWeek - now.getDay() + 7) % 7;
-  if (diffDays === 0 && target <= now) {
+// ================= PARTIDAS, LISTA, PIX 24H E TIMES =================
+function getNextClubDateTimeLocal(club) {
+  const now = new Date();
+  const targetDay = club.defaultDayOfWeek;
+  const [hh, mm] = club.defaultTime.split(":").map(Number);
+
+  const candidate = new Date(now);
+  candidate.setHours(hh, mm, 0, 0);
+
+  let diffDays = (targetDay - now.getDay() + 7) % 7;
+  if (diffDays === 0 && candidate <= now) {
     diffDays = 7;
   }
-  target.setDate(now.getDate() + diffDays);
+  candidate.setDate(now.getDate() + diffDays);
 
   const pad = n => String(n).padStart(2, "0");
-  return `${target.getFullYear()}-${pad(target.getMonth() + 1)}-${pad(target.getDate())}T${pad(hours)}:${pad(minutes)}`;
+  return `${candidate.getFullYear()}-${pad(candidate.getMonth() + 1)}-${pad(candidate.getDate())}T${pad(hh)}:${pad(mm)}`;
 }
 
 async function quickScheduleNextWeeklyMatch() {
-  const club = myClubs.find(c => c.id === selectedClubId);
-  if (!club) {
-    showToast("Selecione ou crie um clube antes de agendar uma pelada.");
-    return;
-  }
+  const club = state.currentClubDetails;
+  if (!club) return;
 
-  const nextDateTime = getNextClubOccurrenceISO(club);
-  const defaultCost = club.defaultVenue?.defaultPrice ? Number(club.defaultVenue.defaultPrice) : 300.00;
+  const nextDateStr = getNextClubDateTimeLocal(club);
+  const cost = club.defaultVenue?.defaultPrice || 300;
+  const defaultPix = state.profile?.pixKey || state.profile?.email || "";
 
   try {
     const res = await apiFetch("/Matches", {
       method: "POST",
       body: JSON.stringify({
         clubId: club.id,
-        matchDateTime: nextDateTime,
-        courtCost: defaultCost,
-        pixReceiverName: currentUser.fullName,
-        pixKey: currentUser.phone || currentUser.email
+        matchDateTime: nextDateStr,
+        courtCost: cost,
+        pixReceiverName: state.profile?.fullName || "Organizador",
+        pixKey: defaultPix
       })
     });
-    showToast(`Pelada fixa de ${DAYS[club.dayOfWeek]} agendada!`);
-    await navigateTo("matches");
-    await loadClubMatches(club.id);
-    await openMatchDetails(res.id);
+    showToast("Próxima pelada semanal criada!");
+    await selectClub(club.id);
+    await openMatchDetail(res.id);
+    navigateTo("matches");
   } catch (err) {
-    showToast(err.message);
+    showToast(err.message, true);
   }
 }
 
-async function openMatchModal() {
-  if (!selectedClubId) {
-    showToast("Selecione ou crie um clube primeiro.");
-    return;
-  }
-  try {
-    cachedVenues = await apiFetch("/Venues");
-    const select = document.getElementById("match-venue-select");
-    select.innerHTML = `<option value="">Digitar valor manualmente</option>` +
-      cachedVenues.map(v => `<option value="${v.id}">${v.name} ${v.defaultPrice ? `(R$ ${Number(v.defaultPrice).toFixed(2)})` : "(Sob consulta)"}</option>`).join("");
+function openMatchModal() {
+  const club = state.currentClubDetails;
+  const sel = document.getElementById("match-venue-select");
+  sel.innerHTML = `<option value="">Digitar valor manualmente</option>` +
+    state.venues.map(v => `<option value="${v.id}" data-price="${v.defaultPrice || ""}">${v.name} ${v.defaultPrice ? `(${formatMoney(v.defaultPrice)})` : "(Sob consulta)"}</option>`).join("");
 
-    const club = myClubs.find(c => c.id === selectedClubId);
-    if (club) {
-      document.getElementById("match-datetime").value = getNextClubOccurrenceISO(club);
-      if (club.defaultVenue) {
-        select.value = club.defaultVenue.id;
-        applyVenuePriceToMatch(club.defaultVenue.id);
+  if (club) {
+    document.getElementById("match-datetime").value = getNextClubDateTimeLocal(club);
+    if (club.defaultVenue) {
+      sel.value = club.defaultVenue.id;
+      if (club.defaultVenue.defaultPrice) {
+        document.getElementById("match-cost").value = club.defaultVenue.defaultPrice;
       }
     }
-    openModal("modal-match");
-  } catch (err) {
-    showToast(err.message);
   }
+  document.getElementById("match-pix-name").value = state.profile?.fullName || "";
+  document.getElementById("match-pix-key").value = state.profile?.pixKey || state.profile?.email || "";
+  openModal("modal-match");
 }
 
 function applyVenuePriceToMatch(venueId) {
-  const venue = cachedVenues.find(v => v.id === venueId);
+  const venue = state.venues.find(v => v.id === venueId);
   if (venue && venue.defaultPrice) {
-    document.getElementById("match-cost").value = Number(venue.defaultPrice).toFixed(2);
+    document.getElementById("match-cost").value = venue.defaultPrice;
   }
 }
 
 async function handleCreateMatch(e) {
   e.preventDefault();
   try {
-    const res = await apiFetch("/Matches", {
-      method: "POST",
-      body: JSON.stringify({
-        clubId: selectedClubId,
-        matchDateTime: document.getElementById("match-datetime").value,
-        courtCost: Number(document.getElementById("match-cost").value),
-        pixReceiverName: document.getElementById("match-pix-name").value.trim(),
-        pixKey: document.getElementById("match-pix-key").value.trim()
-      })
-    });
+    const payload = {
+      clubId: state.currentClubId,
+      matchDateTime: document.getElementById("match-datetime").value,
+      courtCost: Number(document.getElementById("match-cost").value),
+      pixReceiverName: document.getElementById("match-pix-name").value || null,
+      pixKey: document.getElementById("match-pix-key").value || null
+    };
+    const res = await apiFetch("/Matches", { method: "POST", body: JSON.stringify(payload) });
     closeModal("modal-match");
     showToast(res.message);
-    await navigateTo("matches");
-    await loadClubMatches(selectedClubId);
-    await openMatchDetails(res.id);
+    await selectClub(state.currentClubId);
+    await openMatchDetail(res.id);
+    navigateTo("matches");
   } catch (err) {
-    showToast(err.message);
+    showToast(err.message, true);
   }
 }
 
-async function openMatchDetails(matchId) {
+function renderHomeNextMatch(matches) {
+  const box = document.getElementById("home-next-match");
+  if (matches.length === 0) {
+    box.innerHTML = `<p class="muted-text">Nenhuma partida agendada para este clube.</p>`;
+    return;
+  }
+  const m = matches[0];
+  const statusMap = ["Lista Aberta", "Janela Pix Aberta", "Finalizada"];
+  box.innerHTML = `
+    <div class="list-item" style="cursor:pointer" onclick="navigateTo('matches'); openMatchDetail('${m.id}')">
+      <div>
+        <strong>${formatDateTime(m.matchDateTime)}</strong>
+        <div class="muted-text" style="font-size:0.85rem;">Quadra: ${formatMoney(m.courtCost)} • ${m.confirmedCount} confirmados (${m.waitlistCount} espera)</div>
+      </div>
+      <span class="badge-neon">${statusMap[m.status]}</span>
+    </div>
+  `;
+}
+
+function renderMatchesList(matches) {
+  const container = document.getElementById("matches-list");
+  if (matches.length === 0) {
+    container.innerHTML = `<p class="muted-text">Nenhuma pelada agendada ainda.</p>`;
+    return;
+  }
+  const statusMap = ["Lista Aberta", "Pix Aberto", "Finalizada"];
+  container.innerHTML = matches.map(m => `
+    <div class="match-card ${m.id === state.currentMatchId ? "selected" : ""}" onclick="openMatchDetail('${m.id}')">
+      <div class="card-top">
+        <span class="badge-neon">${statusMap[m.status]}</span>
+        <span class="mono-tag">${formatMoney(m.courtCost)}</span>
+      </div>
+      <strong>${formatDateTime(m.matchDateTime)}</strong>
+      <div class="muted-text" style="font-size:0.83rem; margin-top:6px;">
+        ✅ ${m.confirmedCount} na lista • ⏳ ${m.waitlistCount} espera • 💰 ${m.paidCount} pagos
+      </div>
+    </div>
+  `).join("");
+}
+
+function startPixCountdown(match) {
+  if (state.countdownTimer) clearInterval(state.countdownTimer);
+  const el = document.getElementById("detail-pix-countdown");
+
+  const updateTick = () => {
+    if (match.status === 2) {
+      el.textContent = "🏁 Partida Encerrada";
+      return;
+    }
+    if (match.status === 1) {
+      el.textContent = "🔒 Valores Congelados (Pix Aberto)";
+      return;
+    }
+    const matchMs = new Date(match.matchDateTime).getTime();
+    const pixOpenMs = matchMs - 24 * 60 * 60 * 1000;
+    const diff = pixOpenMs - Date.now();
+
+    if (diff <= 0) {
+      el.textContent = "⚡ Janela Pix Liberada!";
+      return;
+    }
+    const hrs = Math.floor(diff / (1000 * 60 * 60));
+    const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    el.textContent = `⏳ Pix abre em ${hrs}h ${mins}m`;
+  };
+
+  updateTick();
+  state.countdownTimer = setInterval(updateTick, 30000);
+}
+
+async function openMatchDetail(matchId) {
+  state.currentMatchId = matchId;
+  renderMatchesList(state.matches);
+
   try {
-    currentMatch = await apiFetch(`/Matches/${matchId}`);
+    const d = await apiFetch(`/Matches/${matchId}`);
+    state.currentMatchDetails = d;
+
     const panel = document.getElementById("match-detail-panel");
     panel.classList.remove("hidden");
 
-    const canManage = currentMatch.myRole >= 1;
-    const dt = new Date(currentMatch.matchDateTime).toLocaleString("pt-BR", { dateStyle: "full", timeStyle: "short" });
-    const statusMap = { 0: "LISTA ABERTA (VALOR ESTIMADO)", 1: "JANELA PIX ABERTA (VALOR CONGELADO)", 3: "SÚMULA VALIDADA" };
-
-    document.getElementById("detail-status-badge").textContent = statusMap[currentMatch.status] || "EM ANDAMENTO";
-    document.getElementById("detail-title").textContent = `${currentMatch.clubName} — ${dt}`;
+    const statusLabels = ["LISTA ABERTA (RATEIO DINÂMICO)", "JANELA PIX ABERTA (VALORES CONGELADOS)", "PARTIDA FINALIZADA"];
+    document.getElementById("detail-status-badge").textContent = statusLabels[d.status];
+    document.getElementById("detail-title").textContent = `${d.clubName} — ${formatDateTime(d.matchDateTime)}`;
     document.getElementById("detail-subtitle").textContent =
-      `Quadra: R$ ${Number(currentMatch.courtCost).toFixed(2)} • Vagas: ${currentMatch.expectedPlayers}`;
+      `Quadra: ${formatMoney(d.courtCost)} • Vagas: ${d.expectedPlayers} • ${d.goalkeepersPay ? "Goleiros pagam" : "Goleiros isentos"}`;
 
-    updatePixCountdown();
-    if (countdownTimer) clearInterval(countdownTimer);
-    countdownTimer = setInterval(updatePixCountdown, 60000);
+    startPixCountdown(d);
 
-    document.getElementById("fin-per-player").textContent = `R$ ${Number(currentMatch.financialSummary.estimatedPerPlayer).toFixed(2)}`;
-    document.getElementById("fin-collected").textContent = `R$ ${Number(currentMatch.financialSummary.totalCollected).toFixed(2)}`;
-    document.getElementById("fin-surplus").textContent = `R$ ${Number(currentMatch.financialSummary.surplusToReserve).toFixed(2)}`;
-    document.getElementById("fin-pix-key").textContent = currentMatch.pixKey
-      ? `${currentMatch.pixKey} (${currentMatch.pixReceiverName || ""})`
+    document.getElementById("fin-per-player").textContent = formatMoney(d.financialSummary.estimatedPerPlayer);
+    document.getElementById("fin-collected").textContent = formatMoney(d.financialSummary.totalCollected);
+    document.getElementById("fin-surplus").textContent = formatMoney(d.financialSummary.surplusToReserve);
+    document.getElementById("fin-pix-key").textContent = d.pixKey
+      ? `${d.pixKey} (${d.pixReceiverName || "Org."})`
       : "Não informada";
 
-    document.getElementById("btn-open-pix").classList.toggle("hidden", !canManage || currentMatch.status !== 0);
-    document.getElementById("btn-draw-teams").classList.toggle("hidden", !canManage);
-    document.getElementById("guest-bar").classList.toggle("hidden", !canManage);
-    document.getElementById("sumula-admin-bar").classList.toggle("hidden", !canManage);
+    const isStaff = d.myRole >= 1;
+    const isFinished = d.status === 2;
 
-    renderRoster();
-    renderTeams();
-    renderSumula();
-    panel.scrollIntoView({ behavior: "smooth" });
+    document.getElementById("btn-open-pix").classList.toggle("hidden", !isStaff || d.status !== 0);
+    document.getElementById("btn-draw-teams").classList.toggle("hidden", !isStaff || isFinished);
+    document.getElementById("guest-bar").classList.toggle("hidden", !isStaff || isFinished);
+    document.getElementById("sumula-admin-bar").classList.toggle("hidden", !isStaff || d.isSumulaValidated);
+    document.getElementById("btn-edit-match-pix").classList.toggle("hidden", !isStaff || isFinished);
+
+    const alreadyIn = d.registrations.some(r => r.userId === state.profile.id);
+    document.getElementById("btn-join-match").classList.toggle("hidden", alreadyIn || isFinished);
+    document.getElementById("btn-join-gk").classList.toggle("hidden", alreadyIn || isFinished);
+
+    renderRoster(d);
+    renderTeams(d);
+    renderSumula(d);
   } catch (err) {
-    showToast(err.message);
+    showToast(err.message, true);
   }
 }
 
-function updatePixCountdown() {
-  if (!currentMatch) return;
-  const el = document.getElementById("detail-pix-countdown");
-  if (currentMatch.status === 1) {
-    el.textContent = "✅ Janela Pix Ativa";
-    return;
-  }
-  if (currentMatch.status >= 3) {
-    el.textContent = "🏁 Partida Encerrada";
-    return;
-  }
-  const matchTime = new Date(currentMatch.matchDateTime).getTime();
-  const pixOpenTime = matchTime - 24 * 60 * 60 * 1000;
-  const diffMs = pixOpenTime - Date.now();
-  if (diffMs <= 0) {
-    el.textContent = "⚡ Pix abrindo automaticamente...";
-  } else {
-    const hrs = Math.floor(diffMs / 3600000);
-    const mins = Math.floor((diffMs % 3600000) / 60000);
-    el.textContent = `⏳ Pix automático em ${hrs}h ${mins}m`;
+function openEditMatchPixModal() {
+  const d = state.currentMatchDetails;
+  if (!d) return;
+  document.getElementById("edit-match-pix-name").value = d.pixReceiverName || state.profile?.fullName || "";
+  document.getElementById("edit-match-pix-key").value = d.pixKey || state.profile?.pixKey || "";
+  openModal("modal-edit-match-pix");
+}
+
+function fillMyDefaultPixInModal() {
+  document.getElementById("edit-match-pix-name").value = state.profile?.fullName || "";
+  document.getElementById("edit-match-pix-key").value = state.profile?.pixKey || state.profile?.email || "";
+}
+
+async function handleUpdateMatchPix(e) {
+  e.preventDefault();
+  try {
+    const payload = {
+      pixReceiverName: document.getElementById("edit-match-pix-name").value.trim(),
+      pixKey: document.getElementById("edit-match-pix-key").value.trim()
+    };
+    const res = await apiFetch(`/Matches/${state.currentMatchId}/pix`, {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    });
+    closeModal("modal-edit-match-pix");
+    showToast(res.message);
+    await openMatchDetail(state.currentMatchId);
+  } catch (err) {
+    showToast(err.message, true);
   }
 }
 
 function copyMatchPixKey() {
-  if (!currentMatch?.pixKey) {
-    showToast("Nenhuma chave Pix cadastrada nesta partida.");
+  const d = state.currentMatchDetails;
+  if (!d || !d.pixKey) return;
+  navigator.clipboard.writeText(d.pixKey);
+  showToast(`Chave Pix "${d.pixKey}" copiada!`);
+}
+
+function copyWhatsAppRoster() {
+  const d = state.currentMatchDetails;
+  if (!d) return;
+
+  const main = d.registrations.filter(r => !r.isWaitlist);
+  const wait = d.registrations.filter(r => r.isWaitlist);
+  const payIcons = ["⏳", "🔔", "✅", "🧤"];
+
+  let text = `⚽ *${d.clubName.toUpperCase()}*\n`;
+  text += `📅 ${formatDateTime(d.matchDateTime)}\n`;
+  text += `💰 Cota: ${formatMoney(d.financialSummary.estimatedPerPlayer)}\n`;
+  if (d.pixKey) text += `🔑 Pix: ${d.pixKey} (${d.pixReceiverName || ""})\n`;
+  text += `\n*LISTA CONFIRMADA (${main.length}/${d.expectedPlayers}):*\n`;
+
+  main.forEach((r, idx) => {
+    text += `${idx + 1}. ${r.displayName} ${r.isGoalkeeper ? "(GOL)" : ""} ${payIcons[r.paymentStatus]}\n`;
+  });
+
+  if (wait.length > 0) {
+    text += `\n*FILA DE ESPERA:*\n`;
+    wait.forEach((r, idx) => {
+      text += `${idx + 1}. ${r.displayName} ${r.isGoalkeeper ? "(GOL)" : ""}\n`;
+    });
+  }
+
+  navigator.clipboard.writeText(text);
+  showToast("Lista formatada copiada para o WhatsApp!");
+}
+
+function switchInnerTab(tabName, btnEl) {
+  document.querySelectorAll(".inner-tab").forEach(b => b.classList.remove("active"));
+  document.querySelectorAll(".inner-content").forEach(c => c.classList.add("hidden"));
+  btnEl.classList.add("active");
+  document.getElementById(`tab-${tabName}`).classList.remove("hidden");
+}
+
+function renderRoster(d) {
+  const container = document.getElementById("roster-list");
+  const isStaff = d.myRole >= 1;
+  const payStatusLabels = ["Pendente", "Aguardando Baixa", "Pago ✅", "Isento"];
+  const payBadgeClass = ["badge-titanium", "badge-warning", "badge-neon", "badge-titanium"];
+
+  if (d.registrations.length === 0) {
+    container.innerHTML = `<p class="muted-text">Nenhum jogador na lista ainda. Clique em "Tô Dentro"!</p>`;
     return;
   }
-  navigator.clipboard.writeText(currentMatch.pixKey)
-    .then(() => showToast("Chave Pix copiada!"))
-    .catch(() => showToast("Não foi possível copiar automaticamente. Selecione e copie a chave."));
+
+  container.innerHTML = d.registrations.map((r, i) => {
+    const isMe = r.userId === state.profile.id;
+    const canRemove = (isMe || isStaff) && d.status !== 2;
+
+    let actionBtns = "";
+    if (!r.isWaitlist && d.status === 1 && isMe && r.paymentStatus === 0) {
+      actionBtns += `<button class="btn-primary btn-sm" onclick="openPixPaymentModal('${r.id}', ${r.amountToPay})">Pagar Pix</button>`;
+    }
+    if (!r.isWaitlist && isStaff && r.paymentStatus !== 2 && r.paymentStatus !== 3) {
+      actionBtns += `<button class="btn-secondary btn-sm" onclick="confirmPayment('${r.id}', 2)">Dar Baixa</button>`;
+    }
+    if (canRemove) {
+      actionBtns += `<button class="btn-danger-ghost btn-sm" onclick="leaveMatch('${r.id}')">Sair</button>`;
+    }
+
+    return `
+      <div class="list-item ${r.isWaitlist ? "waitlist-item" : ""}">
+        <div>
+          <strong>${r.isWaitlist ? "⏳ Espera" : `#${i + 1}`} • ${r.displayName}</strong>
+          ${r.isGoalkeeper ? `<span class="badge-titanium">GOL</span>` : ""}
+          <div class="muted-text" style="font-size:0.82rem;">
+            ${r.isWaitlist ? "Aguardando vaga titular" : `Valor: ${formatMoney(r.amountToPay)}`} • ${"★".repeat(r.skillRank)}
+          </div>
+        </div>
+        <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+          ${!r.isWaitlist ? `<span class="${payBadgeClass[r.paymentStatus]}">${payStatusLabels[r.paymentStatus]}</span>` : ""}
+          ${actionBtns}
+        </div>
+      </div>
+    `;
+  }).join("");
 }
 
 function openPixPaymentModal(regId, amount) {
-  document.getElementById("pix-modal-amount").textContent = `R$ ${Number(amount).toFixed(2)}`;
-  document.getElementById("pix-modal-receiver").textContent =
-    `Recebedor: ${currentMatch.pixReceiverName || "Organizador do Clube"}`;
-  document.getElementById("pix-modal-key").value = currentMatch.pixKey || "Solicitar chave ao organizador";
-  document.getElementById("pix-modal-confirm-btn").onclick = async () => {
+  const d = state.currentMatchDetails;
+  document.getElementById("pix-modal-amount").textContent = formatMoney(amount);
+  document.getElementById("pix-modal-receiver").textContent = `Recebedor: ${d.pixReceiverName || "Organizador do Clube"}`;
+  document.getElementById("pix-modal-key").value = d.pixKey || "Solicite a chave ao organizador no grupo";
+
+  const btn = document.getElementById("pix-modal-confirm-btn");
+  btn.onclick = async () => {
     closeModal("modal-pix");
     await notifyPaid(regId);
   };
@@ -634,535 +883,316 @@ function openPixPaymentModal(regId, amount) {
 
 function copyPixFromModal() {
   const key = document.getElementById("pix-modal-key").value;
-  navigator.clipboard.writeText(key)
-    .then(() => showToast("Chave Pix copiada para a área de transferência!"))
-    .catch(() => showToast("Selecione a chave acima e copie manualmente."));
-}
-
-function copyWhatsAppRoster() {
-  if (!currentMatch) return;
-  const dt = new Date(currentMatch.matchDateTime).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
-  const mains = currentMatch.registrations.filter(r => !r.isWaitlist);
-  const waits = currentMatch.registrations.filter(r => r.isWaitlist);
-
-  let text = `⚽ *${currentMatch.clubName}* — ${dt}\n`;
-  text += `💰 Cota: R$ ${Number(currentMatch.financialSummary.estimatedPerPlayer).toFixed(2)}\n\n`;
-  text += `*CONFIRMADOS (${mains.length}/${currentMatch.expectedPlayers}):*\n`;
-  mains.forEach((p, i) => {
-    const payIcon = p.paymentStatus === 2 ? "✅" : p.paymentStatus === 3 ? "🧤" : "⏳";
-    text += `${i + 1}. ${p.displayName} ${p.isGoalkeeper ? "(GOL)" : ""} ${payIcon}\n`;
-  });
-
-  if (waits.length) {
-    text += `\n*FILA DE ESPERA (${waits.length}):*\n`;
-    waits.forEach((p, i) => {
-      text += `${i + 1}. ${p.displayName}\n`;
-    });
-  }
-
-  navigator.clipboard.writeText(text)
-    .then(() => showToast("Lista formatada copiada para colar no WhatsApp!"))
-    .catch(() => showToast("Não foi possível copiar a lista para o WhatsApp."));
+  navigator.clipboard.writeText(key);
+  showToast("Chave Pix copiada!");
 }
 
 async function joinCurrentMatch(isGoalkeeper) {
-  if (!currentMatch) return;
   try {
-    const res = await apiFetch(`/Matches/${currentMatch.id}/join`, {
+    const res = await apiFetch(`/Matches/${state.currentMatchId}/join`, {
       method: "POST",
       body: JSON.stringify({ isGoalkeeper })
     });
     showToast(res.message);
-    await openMatchDetails(currentMatch.id);
-    await loadClubMatches(selectedClubId);
+    await openMatchDetail(state.currentMatchId);
   } catch (err) {
-    showToast(err.message);
+    showToast(err.message, true);
   }
 }
 
 async function addGuest() {
   const input = document.getElementById("guest-name-input");
-  if (!input.value.trim()) {
-    showToast("Digite o nome do convidado antes de adicionar.");
-    return;
-  }
+  const isGoalkeeper = document.getElementById("guest-gk-input").checked;
+  if (!input.value.trim()) return;
+
   try {
-    const res = await apiFetch(`/Matches/${currentMatch.id}/guests`, {
+    const res = await apiFetch(`/Matches/${state.currentMatchId}/guests`, {
       method: "POST",
-      body: JSON.stringify({
-        guestName: input.value.trim(),
-        isGoalkeeper: document.getElementById("guest-gk-input").checked
-      })
+      body: JSON.stringify({ guestName: input.value.trim(), isGoalkeeper })
     });
     input.value = "";
+    document.getElementById("guest-gk-input").checked = false;
     showToast(res.message);
-    await openMatchDetails(currentMatch.id);
+    await openMatchDetail(state.currentMatchId);
   } catch (err) {
-    showToast(err.message);
+    showToast(err.message, true);
   }
 }
 
-async function leaveMatch(regId) {
+async function leaveMatch(registrationId) {
   try {
-    const res = await apiFetch(`/Matches/${currentMatch.id}/leave/${regId}`, { method: "DELETE" });
+    const res = await apiFetch(`/Matches/${state.currentMatchId}/leave/${registrationId}`, { method: "DELETE" });
     showToast(res.message);
-    await openMatchDetails(currentMatch.id);
-    await loadClubMatches(selectedClubId);
+    await openMatchDetail(state.currentMatchId);
   } catch (err) {
-    showToast(err.message);
+    showToast(err.message, true);
   }
 }
 
 async function openPixWindow() {
   try {
-    const res = await apiFetch(`/Matches/${currentMatch.id}/open-pix`, { method: "POST" });
+    const res = await apiFetch(`/Matches/${state.currentMatchId}/open-pix`, { method: "POST" });
     showToast(res.message);
-    await openMatchDetails(currentMatch.id);
-    await loadClubMatches(selectedClubId);
+    await openMatchDetail(state.currentMatchId);
   } catch (err) {
-    showToast(err.message);
+    showToast(err.message, true);
   }
 }
 
-async function notifyPaid(regId) {
+async function notifyPaid(registrationId) {
   try {
-    const res = await apiFetch(`/Matches/${currentMatch.id}/registrations/${regId}/notify-paid`, { method: "POST" });
+    const res = await apiFetch(`/Matches/${state.currentMatchId}/registrations/${registrationId}/notify-paid`, { method: "POST" });
     showToast(res.message);
-    await openMatchDetails(currentMatch.id);
+    await openMatchDetail(state.currentMatchId);
   } catch (err) {
-    showToast(err.message);
+    showToast(err.message, true);
   }
 }
 
-async function confirmPayment(regId, status) {
+async function confirmPayment(registrationId, status) {
   try {
-    const res = await apiFetch(`/Matches/${currentMatch.id}/registrations/${regId}/payment`, {
+    const res = await apiFetch(`/Matches/${state.currentMatchId}/registrations/${registrationId}/payment`, {
       method: "PATCH",
       body: JSON.stringify({ status })
     });
     showToast(res.message);
-    await openMatchDetails(currentMatch.id);
-    await loadClubMatches(selectedClubId);
+    await openMatchDetail(state.currentMatchId);
   } catch (err) {
-    showToast(err.message);
+    showToast(err.message, true);
   }
 }
 
-function renderRoster() {
-  const canManage = currentMatch.myRole >= 1;
-  const list = document.getElementById("roster-list");
+async function drawTeams() {
+  try {
+    const d = state.currentMatchDetails;
+    const mainCount = d.registrations.filter(r => !r.isWaitlist).length;
+    const numTeams = Math.max(2, Math.round(mainCount / (d.playersPerTeam || 5)));
 
-  if (!currentMatch.registrations.length) {
-    list.innerHTML = `<p class="muted-text">Nenhum jogador na lista ainda. Clique em "Tô Dentro"!</p>`;
+    const res = await apiFetch(`/Matches/${state.currentMatchId}/draw-teams`, {
+      method: "POST",
+      body: JSON.stringify({ numberOfTeams: numTeams })
+    });
+    showToast(res.message);
+    await openMatchDetail(state.currentMatchId);
+  } catch (err) {
+    showToast(err.message, true);
+  }
+}
+
+function renderTeams(d) {
+  const container = document.getElementById("teams-grid");
+  const mainPlayers = d.registrations.filter(r => !r.isWaitlist);
+  const teams = [...new Set(mainPlayers.map(p => p.teamAssigned).filter(Boolean))].sort();
+
+  const leftSel = document.getElementById("game-left");
+  const rightSel = document.getElementById("game-right");
+  const teamOpts = (teams.length > 0 ? teams : ["Time A", "Time B"]).map(t => `<option value="${t}">${t}</option>`).join("");
+  leftSel.innerHTML = teamOpts;
+  rightSel.innerHTML = teamOpts;
+  if (rightSel.options.length > 1) rightSel.selectedIndex = 1;
+
+  if (teams.length === 0) {
+    container.innerHTML = `<p class="muted-text">Os times ainda não foram sorteados. O organizador pode sortear acima.</p>`;
     return;
   }
 
-  list.innerHTML = currentMatch.registrations.map((r, idx) => {
-    const isMe = r.userId === currentUser.id;
+  const isStaff = d.myRole >= 1 && d.status !== 2;
+
+  container.innerHTML = teams.map(team => {
+    const players = mainPlayers.filter(p => p.teamAssigned === team);
+    const totalStars = players.reduce((acc, p) => acc + p.skillRank, 0);
+
     return `
-      <div class="roster-row ${r.isWaitlist ? "waitlist" : ""}">
-        <div>
-          <strong>${idx + 1}. ${r.displayName}</strong>
-          <span class="muted-text"> • ${r.isGoalkeeper ? "🧤 Goleiro" : "⚽ Linha"} • ${"★".repeat(r.skillRank)}</span>
-          ${r.isWaitlist ? `<span class="badge-titanium">FILA DE ESPERA</span>` : ""}
+      <div class="team-box">
+        <div class="card-top">
+          <h4>${team}</h4>
+          <span class="badge-neon">${totalStars}★</span>
         </div>
-        <div class="roster-badges">
-          <span class="mono-tag">R$ ${Number(r.amountToPay).toFixed(2)}</span>
-          <span class="badge-titanium">${PAYMENT_LABELS[r.paymentStatus]}</span>
-          ${isMe && !r.isWaitlist && r.paymentStatus === 0
-            ? `<button class="btn-primary btn-sm" onclick="openPixPaymentModal('${r.id}', ${r.amountToPay})">Pagar Pix</button>` : ""}
-          ${canManage && !r.isWaitlist && r.paymentStatus !== 2 && r.paymentStatus !== 3
-            ? `<button class="btn-primary btn-sm" onclick="confirmPayment('${r.id}', 2)">Baixar Pix</button>` : ""}
-          ${(isMe || canManage)
-            ? `<button class="btn-danger-ghost btn-sm" onclick="leaveMatch('${r.id}')">Remover</button>` : ""}
-        </div>
+        ${players.map(p => `
+          <div class="team-player-row">
+            <span>${p.displayName} ${p.isGoalkeeper ? "🧤" : ""} (${p.skillRank}★)</span>
+            ${isStaff ? `
+              <select class="mini-select" onchange="movePlayerTeam('${p.id}', this.value)">
+                ${teams.map(t => `<option value="${t}" ${t === team ? "selected" : ""}>${t}</option>`).join("")}
+              </select>
+            ` : ""}
+          </div>
+        `).join("")}
       </div>
     `;
   }).join("");
 }
 
-// ================= SORTEIO & TROCA MANUAL DE TIMES =================
-async function drawTeams() {
+async function movePlayerTeam(regId, teamAssigned) {
   try {
-    const numTeams = Math.max(2, Math.floor(currentMatch.expectedPlayers / currentMatch.playersPerTeam));
-    const res = await apiFetch(`/Matches/${currentMatch.id}/draw-teams`, {
-      method: "POST",
-      body: JSON.stringify({ numberOfTeams: numTeams })
-    });
-    showToast(res.message);
-    await openMatchDetails(currentMatch.id);
-  } catch (err) {
-    showToast(err.message);
-  }
-}
-
-async function movePlayerTeam(regId, newTeam) {
-  try {
-    const res = await apiFetch(`/Matches/${currentMatch.id}/registrations/${regId}/team`, {
+    await apiFetch(`/Matches/${state.currentMatchId}/registrations/${regId}/team`, {
       method: "PATCH",
-      body: JSON.stringify({ teamAssigned: newTeam })
+      body: JSON.stringify({ teamAssigned })
     });
-    showToast(res.message);
-    await openMatchDetails(currentMatch.id);
+    showToast("Jogador trocado de time!");
+    await openMatchDetail(state.currentMatchId);
   } catch (err) {
-    showToast(err.message);
+    showToast(err.message, true);
   }
 }
 
-function renderTeams() {
-  const canManage = currentMatch.myRole >= 1;
-  const grid = document.getElementById("teams-grid");
-  const assigned = currentMatch.registrations.filter(r => !r.isWaitlist && r.teamAssigned);
+// ================= SÚMULA OFICIAL =================
+async function createGame() {
+  try {
+    const payload = {
+      title: document.getElementById("game-title").value || "Jogo",
+      teamLeft: document.getElementById("game-left").value,
+      teamRight: document.getElementById("game-right").value
+    };
+    await apiFetch(`/Matches/${state.currentMatchId}/games`, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    showToast("Jogo adicionado à súmula!");
+    await openMatchDetail(state.currentMatchId);
+  } catch (err) {
+    showToast(err.message, true);
+  }
+}
 
-  if (!assigned.length) {
-    grid.innerHTML = `<p class="muted-text">Os times ainda não foram sorteados.</p>`;
+function renderSumula(d) {
+  const container = document.getElementById("games-list");
+  if (d.games.length === 0) {
+    container.innerHTML = `<p class="muted-text">Nenhum jogo registrado na súmula desta pelada.</p>`;
     return;
   }
 
-  const teamNames = [...new Set(assigned.map(p => p.teamAssigned))].sort();
-  const groups = {};
-  teamNames.forEach(t => (groups[t] = assigned.filter(p => p.teamAssigned === t)));
+  const isStaff = d.myRole >= 1 && !d.isSumulaValidated;
+  const players = d.registrations.filter(r => !r.isWaitlist);
+  const playerOpts = players.map(p => `<option value="${p.id}">${p.displayName}</option>`).join("");
 
-  grid.innerHTML = Object.entries(groups).map(([team, players]) => `
-    <div class="team-box">
-      <h4>${team} (${players.length})</h4>
-      <ul>
-        ${players.map(p => `
-          <li style="display:flex; justify-content:space-between; align-items:center; gap:6px;">
-            <span>${p.isGoalkeeper ? "🧤" : "⚽"} ${p.displayName} (${"★".repeat(p.skillRank)})</span>
-            ${canManage ? `
-              <select class="btn-sm" style="width:auto; padding:3px 6px;" onchange="movePlayerTeam('${p.id}', this.value)">
-                ${teamNames.map(t => `<option value="${t}" ${t === team ? "selected" : ""}>${t}</option>`).join("")}
-              </select>
-            ` : ""}
-          </li>
+  container.innerHTML = d.games.map(g => `
+    <div class="game-card">
+      <div class="scoreboard">
+        <span>${g.teamLeft}</span>
+        <strong class="neon-text">${g.scoreLeft} x ${g.scoreRight}</strong>
+        <span>${g.teamRight}</span>
+      </div>
+      <div class="goals-feed">
+        ${g.goals.map(gl => `
+          <div class="goal-line">⚽ <strong>${gl.scorerName}</strong> (${gl.teamName}) ${gl.assistName ? `• 👟 Assist: ${gl.assistName}` : ""}</div>
         `).join("")}
-      </ul>
+      </div>
+      ${isStaff ? `
+        <div class="goal-form">
+          <select id="goal-team-${g.id}">
+            <option value="${g.teamLeft}">${g.teamLeft}</option>
+            <option value="${g.teamRight}">${g.teamRight}</option>
+          </select>
+          <select id="goal-scorer-${g.id}">${playerOpts}</select>
+          <select id="goal-assist-${g.id}">
+            <option value="">Sem assistência</option>
+            ${playerOpts}
+          </select>
+          <button class="btn-secondary btn-sm" onclick="addGoal('${g.id}')">+ Gol</button>
+        </div>
+      ` : ""}
     </div>
   `).join("");
 }
 
-// ================= SÚMULA INTELIGENTE =================
-async function createGame() {
-  const teamLeft = document.getElementById("game-left").value;
-  const teamRight = document.getElementById("game-right").value;
-  if (teamLeft === teamRight) {
-    showToast("Escolha dois times diferentes para criar o confronto.");
-    return;
-  }
+async function addGoal(gameId) {
   try {
-    await apiFetch(`/Matches/${currentMatch.id}/games`, {
+    const assistVal = document.getElementById(`goal-assist-${gameId}`).value;
+    const payload = {
+      teamName: document.getElementById(`goal-team-${gameId}`).value,
+      scorerRegistrationId: document.getElementById(`goal-scorer-${gameId}`).value,
+      assistRegistrationId: assistVal || null
+    };
+    await apiFetch(`/Matches/${state.currentMatchId}/games/${gameId}/goals`, {
       method: "POST",
-      body: JSON.stringify({
-        title: document.getElementById("game-title").value.trim() || "Jogo",
-        teamLeft,
-        teamRight
-      })
+      body: JSON.stringify(payload)
     });
-    showToast("Jogo adicionado na súmula!");
-    await openMatchDetails(currentMatch.id);
+    showToast("Gol registrado!");
+    await openMatchDetail(state.currentMatchId);
   } catch (err) {
-    showToast(err.message);
-  }
-}
-
-async function addGoal(gameId, teamName) {
-  const scorerId = document.getElementById(`scorer-${gameId}`).value;
-  const assistId = document.getElementById(`assist-${gameId}`).value || null;
-  if (!scorerId) {
-    showToast("Selecione o jogador que marcou o gol.");
-    return;
-  }
-
-  try {
-    await apiFetch(`/Matches/${currentMatch.id}/games/${gameId}/goals`, {
-      method: "POST",
-      body: JSON.stringify({ teamName, scorerRegistrationId: scorerId, assistRegistrationId: assistId })
-    });
-    showToast(`Gol registrado para ${teamName}!`);
-    await openMatchDetails(currentMatch.id);
-  } catch (err) {
-    showToast(err.message);
+    showToast(err.message, true);
   }
 }
 
 async function validateSumula() {
   try {
-    const res = await apiFetch(`/Matches/${currentMatch.id}/validate-sumula`, { method: "POST" });
+    const res = await apiFetch(`/Matches/${state.currentMatchId}/validate-sumula`, { method: "POST" });
     showToast(res.message);
-    await loadDashboard();
-    await openMatchDetails(currentMatch.id);
+    await selectClub(state.currentClubId);
   } catch (err) {
-    showToast(err.message);
+    showToast(err.message, true);
   }
 }
 
-function renderSumula() {
-  const canManage = currentMatch.myRole >= 1;
-  const container = document.getElementById("games-list");
-  const assignedTeams = [...new Set(currentMatch.registrations.filter(r => r.teamAssigned).map(r => r.teamAssigned))].sort();
-  const teamOptions = assignedTeams.length ? assignedTeams : ["Time A", "Time B", "Time C"];
-
-  document.getElementById("game-title").value = `Jogo ${currentMatch.games.length + 1}`;
-  document.getElementById("game-left").innerHTML = teamOptions.map(t => `<option value="${t}">${t}</option>`).join("");
-  document.getElementById("game-right").innerHTML = teamOptions.map((t, i) => `<option value="${t}" ${i === 1 ? "selected" : ""}>${t}</option>`).join("");
-
-  const playersOptions = currentMatch.registrations
-    .filter(r => !r.isWaitlist)
-    .map(r => `<option value="${r.id}">${r.displayName}</option>`)
-    .join("");
-
-  if (!currentMatch.games.length) {
-    container.innerHTML = `<p class="muted-text">Nenhum jogo lançado na súmula ainda.</p>`;
+// ================= RANKINGS & LOCAIS =================
+function renderRankingsList(rankings) {
+  const container = document.getElementById("rankings-list");
+  if (rankings.length === 0) {
+    container.innerHTML = `<p class="muted-text">Sem estatísticas validadas ainda.</p>`;
     return;
   }
-
-  container.innerHTML = currentMatch.games.map(g => `
-    <div class="game-card">
-      <div class="card-top">
-        <strong>${g.title}</strong>
-        <span class="badge-titanium">${currentMatch.isSumulaValidated ? "VALIDADO ✓" : "RASCUNHO"}</span>
-      </div>
-      <div class="scoreboard">
-        <span>${g.teamLeft}</span>
-        <span class="neon-text">${g.scoreLeft} x ${g.scoreRight}</span>
-        <span>${g.teamRight}</span>
-      </div>
-      ${canManage && !currentMatch.isSumulaValidated ? `
-        <div class="guest-bar">
-          <select id="scorer-${g.id}">${playersOptions}</select>
-          <select id="assist-${g.id}"><option value="">Sem assistência</option>${playersOptions}</select>
-          <button class="btn-secondary btn-sm" onclick="addGoal('${g.id}', '${g.teamLeft}')">+ Gol ${g.teamLeft}</button>
-          <button class="btn-secondary btn-sm" onclick="addGoal('${g.id}', '${g.teamRight}')">+ Gol ${g.teamRight}</button>
-        </div>
-      ` : ""}
-      <div class="muted-text">
-        ${g.goals.map(gl => `⚽ ${gl.scorerName} (${gl.teamName})${gl.assistName ? ` • Assist: ${gl.assistName}` : ""}`).join("<br/>")}
-      </div>
-    </div>
-  `).join("");
-}
-
-// ================= ELENCO & PERMISSÕES CONTEXTUAIS =================
-async function loadClubSquad(clubId) {
-  currentClubDetails = await apiFetch(`/Clubs/${clubId}`);
-  const isAdmin = currentClubDetails.myRole === 2;
-  const canManage = currentClubDetails.myRole >= 1;
-
-  document.getElementById("squad-count-badge").textContent = `${currentClubDetails.members.length} atletas`;
-  const list = document.getElementById("squad-list");
-
-  list.innerHTML = currentClubDetails.members.map(m => `
-    <div class="roster-row">
+  container.innerHTML = rankings.map((r, idx) => `
+    <div class="list-item">
       <div>
-        <strong>${m.fullName}</strong>
-        <span class="muted-text"> • ${m.position} • ${m.isGoalkeeper ? "🧤 Goleiro" : "Linha"}</span>
-        <div style="margin-top:4px;">
-          <span class="badge-titanium">${ROLES[m.role]}</span>
-          <span class="neon-text" style="margin-left:8px;">${"★".repeat(m.skillRank)}${"☆".repeat(5 - m.skillRank)}</span>
-        </div>
+        <strong>#${idx + 1} ${r.fullName}</strong>
+        <div class="muted-text" style="font-size:0.82rem;">${r.position} • ${r.matches} jogos validados</div>
       </div>
-      <div class="roster-badges">
-        ${canManage ? `
-          <select class="btn-sm" style="width:auto;" onchange="updateMemberRank('${m.memberId}', this.value, ${m.isGoalkeeper})">
-            ${[1,2,3,4,5].map(s => `<option value="${s}" ${m.skillRank === s ? "selected" : ""}>${s}★</option>`).join("")}
-          </select>
-          <button class="btn-secondary btn-sm" onclick="updateMemberRank('${m.memberId}', ${m.skillRank}, ${!m.isGoalkeeper})">
-            ${m.isGoalkeeper ? "Virar Linha" : "Virar Goleiro"}
-          </button>
-        ` : ""}
-        ${isAdmin && m.role !== 2 ? `
-          <button class="btn-warning btn-sm" onclick="toggleSubOrg('${m.memberId}', ${m.role === 1 ? 0 : 1})">
-            ${m.role === 1 ? "Remover SubOrg" : "Promover SubOrg"}
-          </button>
-        ` : ""}
+      <div style="display:flex; gap:12px; align-items:center;">
+        <span class="badge-neon">⚽ ${r.goals} Gols</span>
+        <span class="badge-titanium">👟 ${r.assists} Assist.</span>
       </div>
     </div>
   `).join("");
 }
 
-async function updateMemberRank(memberId, skillRank, isGoalkeeper) {
-  try {
-    const res = await apiFetch(`/Clubs/${selectedClubId}/members/${memberId}/stats`, {
-      method: "PATCH",
-      body: JSON.stringify({ skillRank: Number(skillRank), isGoalkeeper })
-    });
-    showToast(res.message);
-    await loadClubSquad(selectedClubId);
-  } catch (err) {
-    showToast(err.message);
-  }
-}
-
-async function toggleSubOrg(memberId, newRole) {
-  try {
-    const res = await apiFetch(`/Clubs/${selectedClubId}/members/${memberId}/role`, {
-      method: "PATCH",
-      body: JSON.stringify({ role: newRole })
-    });
-    showToast(res.message);
-    await loadClubSquad(selectedClubId);
-  } catch (err) {
-    showToast(err.message);
-  }
-}
-
-// ================= RANKINGS =================
-async function loadClubRankings(clubId) {
-  const ranking = await apiFetch(`/Matches/club/${clubId}/rankings`);
-  const list = document.getElementById("rankings-list");
-
-  if (!ranking.length) {
-    list.innerHTML = `<p class="muted-text">Nenhum dado registrado ainda.</p>`;
-    return;
-  }
-
-  list.innerHTML = ranking.map((p, idx) => `
-    <div class="roster-row">
-      <div>
-        <span class="mono-tag">#${idx + 1}</span>
-        <strong style="margin-left:8px;">${p.fullName}</strong>
-        <span class="muted-text"> • ${p.position} • ${p.matches} jogos</span>
-      </div>
-      <div class="roster-badges">
-        <span class="badge-neon">${p.goals} Gols</span>
-        <span class="badge-titanium">${p.assists} Assist.</span>
-        <span class="mono-tag">${p.totalContributions} G+A</span>
-      </div>
-    </div>
-  `).join("");
-}
-
-// ================= LOCAIS / QUADRAS =================
 async function loadVenues() {
-  cachedVenues = await apiFetch("/Venues");
-  document.getElementById("venues-count").textContent = `${cachedVenues.length} locais`;
-  renderVenuesList(cachedVenues);
+  state.venues = await apiFetch("/Venues");
+  renderVenues(state.venues);
 }
 
 function filterVenuesList() {
-  const q = document.getElementById("venue-search").value.toLowerCase();
-  const filtered = cachedVenues.filter(v =>
-    v.name.toLowerCase().includes(q) || v.address.toLowerCase().includes(q)
+  const term = document.getElementById("venue-search").value.toLowerCase().trim();
+  const filtered = state.venues.filter(v =>
+    v.name.toLowerCase().includes(term) || v.address.toLowerCase().includes(term)
   );
-  renderVenuesList(filtered);
+  renderVenues(filtered);
 }
 
-function renderVenuesList(venues) {
-  const list = document.getElementById("venues-list");
-  if (!venues.length) {
-    list.innerHTML = `<p class="muted-text">Nenhuma quadra encontrada.</p>`;
+function renderVenues(list) {
+  const container = document.getElementById("venues-list");
+  document.getElementById("venues-count").textContent = `${list.length} locais`;
+  if (list.length === 0) {
+    container.innerHTML = `<p class="muted-text">Nenhuma arena encontrada.</p>`;
     return;
   }
-  list.innerHTML = venues.map(v => `
-    <div class="roster-row">
+  container.innerHTML = list.map(v => `
+    <div class="list-item">
       <div>
         <strong>${v.name}</strong>
-        <p class="muted-text">${v.address}</p>
+        <div class="muted-text" style="font-size:0.82rem;">${v.address}</div>
       </div>
-      <span class="mono-tag">${v.isPriceOnRequest ? "Sob consulta" : `R$ ${Number(v.defaultPrice).toFixed(2)}`}</span>
+      <span class="mono-tag">${v.defaultPrice ? formatMoney(v.defaultPrice) : "Sob consulta"}</span>
     </div>
   `).join("");
 }
 
 async function handleCreateVenue(e) {
   e.preventDefault();
-  const priceVal = document.getElementById("venue-price").value;
   try {
-    await apiFetch("/Venues", {
-      method: "POST",
-      body: JSON.stringify({
-        name: document.getElementById("venue-name").value.trim(),
-        address: document.getElementById("venue-address").value.trim(),
-        defaultPrice: priceVal ? Number(priceVal) : null
-      })
-    });
+    const priceRaw = document.getElementById("venue-price").value;
+    const payload = {
+      name: document.getElementById("venue-name").value,
+      address: document.getElementById("venue-address").value,
+      defaultPrice: priceRaw ? Number(priceRaw) : null
+    };
+    await apiFetch("/Venues", { method: "POST", body: JSON.stringify(payload) });
     document.getElementById("venue-name").value = "";
     document.getElementById("venue-address").value = "";
     document.getElementById("venue-price").value = "";
-    showToast("Quadra cadastrada com sucesso!");
+    showToast("Quadra salva com sucesso!");
     await loadVenues();
   } catch (err) {
-    showToast(err.message);
+    showToast(err.message, true);
   }
-}
-
-// ================= PERFIL PRO ID =================
-function renderProfilePage() {
-  if (!currentUser) return;
-  document.getElementById("prof-name").textContent = currentUser.fullName;
-  document.getElementById("prof-email").textContent = currentUser.email;
-  document.getElementById("prof-shirt").textContent = `#${currentUser.shirtNumber}`;
-  document.getElementById("prof-meta").textContent =
-    `${currentUser.position} • ${FEET[currentUser.preferredFoot]}${currentUser.city ? ` • ${currentUser.city}` : ""}`;
-
-  const fallbackAvatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(currentUser.fullName)}&background=00F5A0&color=061014&bold=true`;
-  document.getElementById("prof-avatar").src = currentUser.photoUrl || fallbackAvatar;
-
-  document.getElementById("prof-stat-matches").textContent = currentUser.stats.matches;
-  document.getElementById("prof-stat-goals").textContent = currentUser.stats.goals;
-  document.getElementById("prof-stat-assists").textContent = currentUser.stats.assists;
-  document.getElementById("prof-stat-avg").textContent = currentUser.stats.contributionsPerGame;
-
-  document.getElementById("edit-name").value = currentUser.fullName;
-  document.getElementById("edit-position").value = currentUser.position;
-  document.getElementById("edit-foot").value = currentUser.preferredFoot;
-  document.getElementById("edit-shirt").value = currentUser.shirtNumber;
-  document.getElementById("edit-city").value = currentUser.city || "";
-  document.getElementById("edit-phone").value = currentUser.phone || "";
-  document.getElementById("edit-photo").value = currentUser.photoUrl || "";
-
-  const clubsList = document.getElementById("prof-clubs-list");
-  clubsList.innerHTML = currentUser.clubs.length
-    ? currentUser.clubs.map(c => `
-        <div class="roster-row">
-          <strong>${c.clubName}</strong>
-          <div>
-            <span class="badge-titanium">${ROLES[c.role]}</span>
-            <span class="neon-text" style="margin-left:8px;">${"★".repeat(c.skillRank)}</span>
-          </div>
-        </div>
-      `).join("")
-    : `<p class="muted-text">Você ainda não participa de nenhum clube.</p>`;
-}
-
-async function handleUpdateProfile(e) {
-  e.preventDefault();
-  try {
-    const res = await apiFetch("/Auth/me", {
-      method: "PUT",
-      body: JSON.stringify({
-        fullName: document.getElementById("edit-name").value.trim(),
-        position: document.getElementById("edit-position").value,
-        preferredFoot: Number(document.getElementById("edit-foot").value),
-        shirtNumber: Number(document.getElementById("edit-shirt").value),
-        city: document.getElementById("edit-city").value.trim() || null,
-        phone: document.getElementById("edit-phone").value.trim() || null,
-        photoUrl: document.getElementById("edit-photo").value.trim() || null
-      })
-    });
-    showToast(res.message);
-    currentUser = await apiFetch("/Auth/me");
-    renderProfileSummary();
-    renderProfilePage();
-  } catch (err) {
-    showToast(err.message);
-  }
-}
-
-// ================= HELPERS =================
-function switchInnerTab(tabName, btn) {
-  document.querySelectorAll(".inner-tab").forEach(b => b.classList.remove("active"));
-  document.querySelectorAll(".inner-content").forEach(c => c.classList.add("hidden"));
-  btn.classList.add("active");
-  document.getElementById(`tab-${tabName}`).classList.remove("hidden");
-}
-
-function openModal(id) { document.getElementById(id).classList.remove("hidden"); }
-function closeModal(id) { document.getElementById(id).classList.add("hidden"); }
-
-if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js").catch(() => {});
-  });
 }

@@ -10,6 +10,11 @@ public record CreateMatchRequest(
     string? PixKey
 );
 
+public record UpdateMatchPixRequest(
+    string? PixReceiverName,
+    string? PixKey
+);
+
 public record JoinMatchRequest(
     bool IsGoalkeeper = false
 );

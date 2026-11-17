@@ -174,7 +174,10 @@ public class MatchesController : ControllerBase
     public async Task<IActionResult> CreateMatch(CreateMatchRequest req)
     {
         var userId = GetCurrentUserId();
-        var member = await _db.ClubMembers.FirstOrDefaultAsync(m => m.ClubId == req.ClubId && m.UserId == userId);
+        var member = await _db.ClubMembers
+            .Include(m => m.User)
+            .FirstOrDefaultAsync(m => m.ClubId == req.ClubId && m.UserId == userId);
+
         if (member is null || member.Role == ClubRole.Player) return Forbid();
 
         // Converte o horário de Brasília (UTC-3) corretamente para UTC real no banco
@@ -185,13 +188,21 @@ public class MatchesController : ControllerBase
             ? TimeZoneInfo.ConvertTimeToUtc(req.MatchDateTime, brazilTz)
             : req.MatchDateTime.ToUniversalTime();
 
+        var resolvedPixReceiver = string.IsNullOrWhiteSpace(req.PixReceiverName)
+            ? member.User.FullName
+            : req.PixReceiverName.Trim();
+
+        var resolvedPixKey = string.IsNullOrWhiteSpace(req.PixKey)
+            ? (!string.IsNullOrWhiteSpace(member.User.PixKey) ? member.User.PixKey : member.User.Email)
+            : req.PixKey.Trim();
+
         var match = new Match
         {
             ClubId = req.ClubId,
             MatchDateTime = normalizedDateTime,
             CourtCost = req.CourtCost,
-            PixReceiverName = req.PixReceiverName,
-            PixKey = req.PixKey,
+            PixReceiverName = resolvedPixReceiver,
+            PixKey = resolvedPixKey,
             Status = MatchStatus.OpenList
         };
 
@@ -199,6 +210,32 @@ public class MatchesController : ControllerBase
         await _db.SaveChangesAsync();
 
         return Ok(new { match.Id, message = "Partida criada e lista aberta!" });
+    }
+
+    // Atualizar Recebedor e Chave Pix da partida (Admin ou SubOrg)
+    [HttpPatch("{matchId:guid}/pix")]
+    public async Task<IActionResult> UpdateMatchPix(Guid matchId, UpdateMatchPixRequest req)
+    {
+        var userId = GetCurrentUserId();
+        var match = await _db.Matches.FirstOrDefaultAsync(m => m.Id == matchId);
+        if (match is null) return NotFound();
+
+        var requester = await _db.ClubMembers
+            .Include(cm => cm.User)
+            .FirstOrDefaultAsync(cm => cm.ClubId == match.ClubId && cm.UserId == userId);
+
+        if (requester is null || requester.Role == ClubRole.Player) return Forbid();
+
+        match.PixReceiverName = string.IsNullOrWhiteSpace(req.PixReceiverName)
+            ? requester.User.FullName
+            : req.PixReceiverName.Trim();
+
+        match.PixKey = string.IsNullOrWhiteSpace(req.PixKey)
+            ? null
+            : req.PixKey.Trim();
+
+        await _db.SaveChangesAsync();
+        return Ok(new { message = "Dados de Pix da pelada atualizados!" });
     }
 
     // Entrar na lista da partida ("Tô Dentro")
@@ -314,7 +351,6 @@ public class MatchesController : ControllerBase
         var target = match.Registrations.FirstOrDefault(r => r.Id == registrationId);
         if (target is null) return NotFound();
 
-        // Jogador só remove a si mesmo; Admin/SubOrg remove qualquer um
         if (requester.Role == ClubRole.Player && target.UserId != userId)
             return Forbid();
 
@@ -323,7 +359,6 @@ public class MatchesController : ControllerBase
 
         _db.MatchRegistrations.Remove(target);
 
-        // Se saiu um titular, promove o primeiro da fila de espera
         if (wasMainPlayer)
         {
             var nextInLine = match.Registrations
@@ -437,13 +472,11 @@ public class MatchesController : ControllerBase
             .ThenBy(_ => Guid.NewGuid())
             .ToList();
 
-        // Distribui goleiros 1 por time
         for (int i = 0; i < goalkeepers.Count; i++)
         {
             goalkeepers[i].TeamAssigned = teamNames[i % teamCount];
         }
 
-        // Draft Serpente (1-2-3, 3-2-1) para equilibrar as estrelas
         for (int i = 0; i < fieldPlayers.Count; i++)
         {
             int round = i / teamCount;
@@ -475,7 +508,7 @@ public class MatchesController : ControllerBase
         return Ok(new { message = "Jogador movido de time!" });
     }
 
-    // Criar jogo na Súmula (ex: Jogo 1 - Time A x Time B)
+    // Criar jogo na Súmula
     [HttpPost("{matchId:guid}/games")]
     public async Task<IActionResult> CreateGame(Guid matchId, CreateGameRequest req)
     {
@@ -561,7 +594,7 @@ public class MatchesController : ControllerBase
         });
     }
 
-    // Ranking de Artilharia, Assistências e Participações do Clube (apenas súmulas validadas)
+    // Ranking de Artilharia, Assistências e Participações do Clube
     [HttpGet("club/{clubId:guid}/rankings")]
     public async Task<IActionResult> GetClubRankings(Guid clubId)
     {

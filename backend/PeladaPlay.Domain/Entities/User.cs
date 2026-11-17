@@ -14,6 +14,7 @@ public class User
     public int ShirtNumber { get; set; } = 10;
     public string? City { get; set; }
     public string? Phone { get; set; }
+    public string? PixKey { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public ICollection<ClubMember> Memberships { get; set; } = new List<ClubMember>();

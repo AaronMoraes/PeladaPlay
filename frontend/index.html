@@ -3,13 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-  <meta name="theme-color" content="#090B0E" />
+  <meta name="theme-color" content="#10b981" />
   <title>PeladaPlay — Fusion Sports Tech</title>
   <link rel="manifest" href="manifest.json" />
-  <meta name="theme-color" content="#10b981" />
   <link rel="icon" type="image/png" href="icon-192.png" />
   <link rel="apple-touch-icon" href="icon-512.png" />
-  <link rel="manifest" href="manifest.json" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet" />
@@ -32,31 +30,31 @@
         <button id="tab-register" class="tab-btn" onclick="switchAuthTab('register')">Criar PRO ID</button>
       </div>
 
-      <form id="login-form" onsubmit="handleLogin(event)">
+      <form id="login-form" method="post" autocomplete="on" onsubmit="handleLogin(event)">
         <div class="form-group">
-          <label>E-mail</label>
-          <input type="email" id="login-email" placeholder="atleta@peladaplay.com" required />
+          <label for="login-email">E-mail</label>
+          <input type="email" id="login-email" name="email" autocomplete="username" inputmode="email" autocapitalize="none" placeholder="atleta@peladaplay.com" required />
         </div>
         <div class="form-group">
-          <label>Senha</label>
-          <input type="password" id="login-password" placeholder="••••••••" required />
+          <label for="login-password">Senha</label>
+          <input type="password" id="login-password" name="password" autocomplete="current-password" placeholder="••••••••" required />
         </div>
         <button type="submit" class="btn-primary w-full">Entrar em Campo</button>
       </form>
 
-      <form id="register-form" class="hidden" onsubmit="handleRegister(event)">
+      <form id="register-form" class="hidden" method="post" autocomplete="on" onsubmit="handleRegister(event)">
         <div class="form-group">
-          <label>Nome Completo / Apelido</label>
-          <input type="text" id="reg-name" placeholder="Ex: Lucas Silva" required />
+          <label for="reg-name">Nome Completo / Apelido</label>
+          <input type="text" id="reg-name" name="name" autocomplete="name" placeholder="Ex: Lucas Silva" required />
         </div>
         <div class="grid-2">
           <div class="form-group">
-            <label>E-mail</label>
-            <input type="email" id="reg-email" placeholder="lucas@email.com" required />
+            <label for="reg-email">E-mail</label>
+            <input type="email" id="reg-email" name="email" autocomplete="username" inputmode="email" autocapitalize="none" placeholder="lucas@email.com" required />
           </div>
           <div class="form-group">
-            <label>Senha</label>
-            <input type="password" id="reg-password" placeholder="Mín. 6 caracteres" required />
+            <label for="reg-password">Senha</label>
+            <input type="password" id="reg-password" name="new-password" autocomplete="new-password" placeholder="Mín. 6 caracteres" required />
           </div>
         </div>
         <div class="grid-3">
@@ -240,7 +238,10 @@
           </div>
           <div>
             <span class="stat-label">CHAVE PIX DO ORGANIZADOR</span>
-            <strong id="fin-pix-key" class="mono-tag copyable" title="Clique para copiar" onclick="copyMatchPixKey()">Não informada</strong>
+            <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-top:4px;">
+              <strong id="fin-pix-key" class="mono-tag copyable" title="Clique para copiar" onclick="copyMatchPixKey()">Não informada</strong>
+              <button id="btn-edit-match-pix" class="btn-secondary btn-sm hidden" title="Alterar Recebedor e Chave Pix" onclick="openEditMatchPixModal()">✏️ Editar Pix</button>
+            </div>
           </div>
         </div>
 
@@ -378,7 +379,7 @@
 
       <article class="bento-card">
         <h2>Editar Dados do Atleta</h2>
-        <p class="muted-text mb-20">Personalize sua ficha técnica visível para todos os seus clubes.</p>
+        <p class="muted-text mb-20">Personalize sua ficha técnica e sua Chave Pix padrão (usada automaticamente quando você organizar peladas).</p>
         <form onsubmit="handleUpdateProfile(event)">
           <div class="form-group">
             <label>Nome Completo / Apelido</label>
@@ -417,6 +418,10 @@
               <label>WhatsApp / Telefone</label>
               <input type="text" id="edit-phone" placeholder="(16) 99999-9999" />
             </div>
+          </div>
+          <div class="form-group">
+            <label>Minha Chave Pix Padrão (Organizador / Sub-Organizador)</label>
+            <input type="text" id="edit-pix-key" placeholder="CPF, Celular, E-mail ou Chave Aleatória" />
           </div>
           <div class="form-group">
             <label>URL da Foto de Perfil (Opcional)</label>
@@ -623,6 +628,33 @@
           </div>
         </div>
         <button type="submit" class="btn-warning w-full">Atualizar Saldo da Caixinha</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ================= MODAL 5: EDITAR PIX DA PARTIDA ================= -->
+  <div id="modal-edit-match-pix" class="modal-backdrop hidden">
+    <div class="bento-card modal-box">
+      <div class="card-top">
+        <h3>Editar Pix desta Pelada</h3>
+        <button class="btn-ghost" onclick="closeModal('modal-edit-match-pix')">✕</button>
+      </div>
+      <p class="muted-text mb-10" style="font-size:0.85rem;">
+        Altere o recebedor ou a chave Pix apenas para esta partida (ex: quando o Sub-Organizador for receber o rateio).
+      </p>
+      <form onsubmit="handleUpdateMatchPix(event)">
+        <div class="form-group">
+          <label>Nome do Recebedor</label>
+          <input type="text" id="edit-match-pix-name" placeholder="Nome de quem vai receber" required />
+        </div>
+        <div class="form-group">
+          <label>Chave Pix</label>
+          <input type="text" id="edit-match-pix-key" placeholder="CPF, Celular, E-mail ou Aleatória" required />
+        </div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button type="button" class="btn-secondary" style="flex:1;" onclick="fillMyDefaultPixInModal()">Usar Meu Pix do Perfil</button>
+          <button type="submit" class="btn-primary" style="flex:1;">Salvar Pix da Pelada</button>
+        </div>
       </form>
     </div>
   </div>
