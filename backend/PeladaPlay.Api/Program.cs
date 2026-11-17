@@ -6,6 +6,9 @@ using Microsoft.OpenApi.Models;
 using PeladaPlay.Api.Services;
 using PeladaPlay.Infrastructure.Data;
 
+// Garante compatibilidade total de DateTime entre o front-end e o PostgreSQL (Neon)
+AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
@@ -55,20 +58,33 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     });
 
 builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowAll", policy =>
     {
-        options.AddPolicy("AllowFrontend", policy =>
-        {
-            policy.WithOrigins(
-                "http://localhost:5500",
-                "http://127.0.0.1:5500",
-                "https://peladaplay-kappa.vercel.app"
-              )
+        policy.AllowAnyOrigin()
               .AllowAnyHeader()
               .AllowAnyMethod();
-        });
     });
+});
 
 var app = builder.Build();
+
+// CORS sempre primeiro para garantir cabeçalhos mesmo em respostas de erro
+app.UseCors("AllowAll");
+
+// Tratamento global de erros retornando JSON amigável sem quebrar o CORS
+app.UseExceptionHandler(errorApp =>
+{
+    errorApp.Run(async context =>
+    {
+        context.Response.StatusCode = 500;
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsJsonAsync(new
+        {
+            message = "Ocorreu um erro interno ao processar sua solicitação. Tente novamente."
+        });
+    });
+});
 
 if (app.Environment.IsDevelopment())
 {
@@ -76,9 +92,9 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.UseCors("AllowFrontend");
 app.UseAuthentication();
 app.UseAuthorization();
+
 // Seed automático de quadras/campos caso o banco ainda não possua locais cadastrados
 using (var scope = app.Services.CreateScope())
 {
@@ -97,6 +113,7 @@ using (var scope = app.Services.CreateScope())
         db.SaveChanges();
     }
 }
+
 app.MapControllers();
 
 app.Run();

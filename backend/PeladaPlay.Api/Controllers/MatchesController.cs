@@ -177,10 +177,18 @@ public class MatchesController : ControllerBase
         var member = await _db.ClubMembers.FirstOrDefaultAsync(m => m.ClubId == req.ClubId && m.UserId == userId);
         if (member is null || member.Role == ClubRole.Player) return Forbid();
 
+        // Converte o horário de Brasília (UTC-3) corretamente para UTC real no banco
+        var brazilTz = TimeZoneInfo.FindSystemTimeZoneById(
+            OperatingSystem.IsWindows() ? "E. South America Standard Time" : "America/Sao_Paulo");
+
+        var normalizedDateTime = req.MatchDateTime.Kind == DateTimeKind.Unspecified
+            ? TimeZoneInfo.ConvertTimeToUtc(req.MatchDateTime, brazilTz)
+            : req.MatchDateTime.ToUniversalTime();
+
         var match = new Match
         {
             ClubId = req.ClubId,
-            MatchDateTime = req.MatchDateTime,
+            MatchDateTime = normalizedDateTime,
             CourtCost = req.CourtCost,
             PixReceiverName = req.PixReceiverName,
             PixKey = req.PixKey,
