@@ -10,45 +10,120 @@ let selectedClubId = localStorage.getItem("peladaplay_club") || null;
 let currentClubDetails = null;
 let currentMatch = null;
 let countdownTimer = null;
+let toastTimeout = null;
 
 const DAYS = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"];
 const FEET = ["Destro", "Canhoto", "Ambidestro"];
 const ROLES = ["Jogador", "Sub-Organizador", "Organizador (Admin)"];
 const PAYMENT_LABELS = ["Pendente", "Aguardando Baixa", "Pago ✓", "Isento"];
 
-// Registra Service Worker PWA
-if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("./sw.js").catch(() => {});
-}
-
 document.addEventListener("DOMContentLoaded", () => {
   if (token) loadDashboard();
 });
 
-function showToast(msg) {
+function showToast(msg, duration = 4000) {
   const el = document.getElementById("toast");
+  if (!el) return;
   el.textContent = msg;
   el.classList.remove("hidden");
-  setTimeout(() => el.classList.add("hidden"), 3500);
+  if (toastTimeout) clearTimeout(toastTimeout);
+  toastTimeout = setTimeout(() => el.classList.add("hidden"), duration);
+}
+
+function getFriendlyHttpError(status, data) {
+  if (data) {
+    if (typeof data === "string" && data.trim()) return data;
+    if (data.message) return data.message;
+    if (data.errors) {
+      const firstKey = Object.keys(data.errors)[0];
+      if (firstKey && data.errors[firstKey]?.length) {
+        return data.errors[firstKey][0];
+      }
+    }
+    if (data.title && status === 400) return "Verifique os dados preenchidos e tente novamente.";
+  }
+
+  switch (status) {
+    case 400: return "Dados inválidos. Confira as informações preenchidas.";
+    case 401: return "Sua sessão expirou. Entre novamente na sua conta.";
+    case 403: return "Você não tem permissão de organizador para realizar esta ação.";
+    case 404: return "O registro solicitado não foi encontrado ou já foi removido.";
+    case 409: return "Este registro já existe ou está em conflito.";
+    case 429: return "Muitas tentativas seguidas. Aguarde alguns segundos.";
+    case 500:
+    case 502:
+    case 503:
+    case 504:
+      return "O servidor está passando por uma instabilidade momentânea. Tente novamente em instantes.";
+    default:
+      return "Não foi possível concluir a operação. Tente novamente.";
+  }
 }
 
 async function apiFetch(endpoint, options = {}) {
   const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const res = await fetch(`${API_URL}${endpoint}`, { ...options, headers });
-  if (res.status === 401) {
-    logout();
-    throw new Error("Sessão expirada.");
-  }
+  const executeRequest = async () => {
+    const res = await fetch(`${API_URL}${endpoint}`, { ...options, headers });
 
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.message || "Erro ao processar requisição.");
-  return data;
+    if (res.status === 401) {
+      logout();
+      throw new Error("Sua sessão expirou. Faça login novamente.");
+    }
+
+    const rawText = await res.text();
+    let data = {};
+    try {
+      data = rawText ? JSON.parse(rawText) : {};
+    } catch {
+      data = rawText;
+    }
+
+    if (!res.ok) {
+      throw new Error(getFriendlyHttpError(res.status, data));
+    }
+
+    return data;
+  };
+
+  try {
+    return await executeRequest();
+  } catch (err) {
+    const isNetworkOrColdStart =
+      err instanceof TypeError ||
+      err.message === "Load failed" ||
+      err.message === "Failed to fetch" ||
+      err.message.includes("NetworkError");
+
+    if (isNetworkOrColdStart) {
+      if (!navigator.onLine) {
+        throw new Error("Você está sem conexão com a internet. Verifique seu Wi-Fi ou 4G/5G.");
+      }
+
+      showToast("Conectando ao servidor... Aguarde um instante.", 4500);
+      await new Promise(resolve => setTimeout(resolve, 3500));
+
+      try {
+        return await executeRequest();
+      } catch (retryErr) {
+        if (
+          retryErr instanceof TypeError ||
+          retryErr.message === "Load failed" ||
+          retryErr.message === "Failed to fetch"
+        ) {
+          throw new Error("O servidor está acordando. Toque novamente em alguns segundos.");
+        }
+        throw retryErr;
+      }
+    }
+
+    throw err;
+  }
 }
 
 // ================= NAVEGAÇÃO ENTRE ABAS =================
-function navigateTo(page) {
+async function navigateTo(page) {
   document.querySelectorAll(".page-section").forEach(sec => sec.classList.add("hidden"));
   document.getElementById(`page-${page}`).classList.remove("hidden");
 
@@ -56,10 +131,14 @@ function navigateTo(page) {
     btn.classList.toggle("active", btn.dataset.page === page);
   });
 
-  if (page === "squad" && selectedClubId) loadClubSquad(selectedClubId);
-  if (page === "rankings" && selectedClubId) loadClubRankings(selectedClubId);
-  if (page === "venues") loadVenues();
-  if (page === "profile") renderProfilePage();
+  try {
+    if (page === "squad" && selectedClubId) await loadClubSquad(selectedClubId);
+    if (page === "rankings" && selectedClubId) await loadClubRankings(selectedClubId);
+    if (page === "venues") await loadVenues();
+    if (page === "profile") renderProfilePage();
+  } catch (err) {
+    showToast(err.message);
+  }
 }
 
 // ================= AUTENTICAÇÃO =================
@@ -76,14 +155,14 @@ async function handleLogin(e) {
     const res = await apiFetch("/Auth/login", {
       method: "POST",
       body: JSON.stringify({
-        email: document.getElementById("login-email").value,
+        email: document.getElementById("login-email").value.trim(),
         password: document.getElementById("login-password").value
       })
     });
     token = res.token;
     localStorage.setItem("peladaplay_token", token);
     showToast(`Bem-vindo, ${res.fullName}!`);
-    loadDashboard();
+    await loadDashboard();
   } catch (err) {
     showToast(err.message);
   }
@@ -95,8 +174,8 @@ async function handleRegister(e) {
     const res = await apiFetch("/Auth/register", {
       method: "POST",
       body: JSON.stringify({
-        fullName: document.getElementById("reg-name").value,
-        email: document.getElementById("reg-email").value,
+        fullName: document.getElementById("reg-name").value.trim(),
+        email: document.getElementById("reg-email").value.trim(),
         password: document.getElementById("reg-password").value,
         position: document.getElementById("reg-position").value,
         preferredFoot: Number(document.getElementById("reg-foot").value),
@@ -106,7 +185,7 @@ async function handleRegister(e) {
     token = res.token;
     localStorage.setItem("peladaplay_token", token);
     showToast("PRO ID criado com sucesso!");
-    loadDashboard();
+    await loadDashboard();
   } catch (err) {
     showToast(err.message);
   }
@@ -158,52 +237,61 @@ function renderProfileSummary() {
 
 async function selectClub(clubId) {
   if (!clubId) return;
-  selectedClubId = clubId;
-  localStorage.setItem("peladaplay_club", clubId);
-  document.getElementById("match-detail-panel").classList.add("hidden");
+  try {
+    selectedClubId = clubId;
+    localStorage.setItem("peladaplay_club", clubId);
+    document.getElementById("match-detail-panel").classList.add("hidden");
 
-  const club = myClubs.find(c => c.id === clubId);
-  if (!club) return;
+    const club = myClubs.find(c => c.id === clubId);
+    if (!club) return;
 
-  document.getElementById("club-title").textContent = club.name;
-  document.getElementById("club-role-badge").textContent = ROLES[club.myRole].toUpperCase();
-  document.getElementById("club-invite-code").textContent = `CONVITE: ${club.inviteCode}`;
-  document.getElementById("club-schedule").textContent =
-    `${DAYS[club.dayOfWeek]} às ${club.startTime} • ${club.expectedPlayers} vagas (${club.playersPerTeam}x${club.playersPerTeam})` +
-    (club.defaultVenue ? ` • 📍 ${club.defaultVenue.name}` : "");
-  document.getElementById("club-reserve").textContent = `R$ ${Number(club.cashReserve).toFixed(2)}`;
+    document.getElementById("club-title").textContent = club.name;
+    document.getElementById("club-role-badge").textContent = ROLES[club.myRole].toUpperCase();
+    document.getElementById("club-invite-code").textContent = `CONVITE: ${club.inviteCode}`;
+    document.getElementById("club-schedule").textContent =
+      `${DAYS[club.dayOfWeek]} às ${club.startTime} • ${club.expectedPlayers} vagas (${club.playersPerTeam}x${club.playersPerTeam})` +
+      (club.defaultVenue ? ` • 📍 ${club.defaultVenue.name}` : "");
+    document.getElementById("club-reserve").textContent = `R$ ${Number(club.cashReserve).toFixed(2)}`;
 
-  const canManage = club.myRole >= 1;
-  const isAdmin = club.myRole === 2;
-  const dayLabel = DAYS[club.dayOfWeek];
+    const canManage = club.myRole >= 1;
+    const isAdmin = club.myRole === 2;
+    const dayLabel = DAYS[club.dayOfWeek];
 
-  const quickHomeBtn = document.getElementById("btn-quick-next-match");
-  const quickPageBtn = document.getElementById("btn-quick-next-match-page");
-  quickHomeBtn.textContent = `⚡ Agendar ${dayLabel} (${club.startTime})`;
-  quickPageBtn.textContent = `⚡ Agendar ${dayLabel} (${club.startTime})`;
+    const quickHomeBtn = document.getElementById("btn-quick-next-match");
+    const quickPageBtn = document.getElementById("btn-quick-next-match-page");
+    quickHomeBtn.textContent = `⚡ Agendar ${dayLabel} (${club.startTime})`;
+    quickPageBtn.textContent = `⚡ Agendar ${dayLabel} (${club.startTime})`;
 
-  quickHomeBtn.classList.toggle("hidden", !canManage);
-  quickPageBtn.classList.toggle("hidden", !canManage);
-  document.getElementById("btn-new-match-home").classList.toggle("hidden", !canManage);
-  document.getElementById("btn-new-match-page").classList.toggle("hidden", !canManage);
-  document.getElementById("btn-club-settings").classList.toggle("hidden", !isAdmin);
+    quickHomeBtn.classList.toggle("hidden", !canManage);
+    quickPageBtn.classList.toggle("hidden", !canManage);
+    document.getElementById("btn-new-match-home").classList.toggle("hidden", !canManage);
+    document.getElementById("btn-new-match-page").classList.toggle("hidden", !canManage);
+    document.getElementById("btn-club-settings").classList.toggle("hidden", !isAdmin);
 
-  await loadClubMatches(clubId);
+    await loadClubMatches(clubId);
+  } catch (err) {
+    showToast(err.message);
+  }
 }
 
 function copyInviteCode() {
   const club = myClubs.find(c => c.id === selectedClubId);
   if (!club) return;
-  navigator.clipboard.writeText(club.inviteCode);
-  showToast(`Código ${club.inviteCode} copiado!`);
+  navigator.clipboard.writeText(club.inviteCode)
+    .then(() => showToast(`Código ${club.inviteCode} copiado!`))
+    .catch(() => showToast("Não foi possível copiar automaticamente. Copie manualmente."));
 }
 
 async function openClubModal() {
-  cachedVenues = await apiFetch("/Venues");
-  const select = document.getElementById("new-club-venue");
-  select.innerHTML = `<option value="">Sem quadra fixa</option>` +
-    cachedVenues.map(v => `<option value="${v.id}">${v.name}</option>`).join("");
-  openModal("modal-club");
+  try {
+    cachedVenues = await apiFetch("/Venues");
+    const select = document.getElementById("new-club-venue");
+    select.innerHTML = `<option value="">Sem quadra fixa</option>` +
+      cachedVenues.map(v => `<option value="${v.id}">${v.name}</option>`).join("");
+    openModal("modal-club");
+  } catch (err) {
+    showToast(err.message);
+  }
 }
 
 async function handleCreateClub(e) {
@@ -213,7 +301,7 @@ async function handleCreateClub(e) {
     const res = await apiFetch("/Clubs", {
       method: "POST",
       body: JSON.stringify({
-        name: document.getElementById("new-club-name").value,
+        name: document.getElementById("new-club-name").value.trim(),
         dayOfWeek: Number(document.getElementById("new-club-day").value),
         startTime: document.getElementById("new-club-time").value,
         durationMinutes: 90,
@@ -235,7 +323,11 @@ async function handleCreateClub(e) {
 async function handleJoinClub(e) {
   e.preventDefault();
   try {
-    const code = document.getElementById("invite-code-input").value;
+    const code = document.getElementById("invite-code-input").value.trim();
+    if (!code) {
+      showToast("Digite o código de convite do clube.");
+      return;
+    }
     const res = await apiFetch(`/Clubs/join/${encodeURIComponent(code)}`, { method: "POST" });
     closeModal("modal-club");
     selectedClubId = res.id;
@@ -249,7 +341,10 @@ async function handleJoinClub(e) {
 // ================= CONFIGURAÇÕES & CAIXINHA DO CLUBE =================
 function openClubSettingsModal() {
   const club = myClubs.find(c => c.id === selectedClubId);
-  if (!club) return;
+  if (!club) {
+    showToast("Selecione um clube primeiro.");
+    return;
+  }
   document.getElementById("set-club-name").value = club.name;
   document.getElementById("set-club-day").value = club.dayOfWeek;
   document.getElementById("set-club-time").value = club.startTime;
@@ -265,7 +360,7 @@ async function handleUpdateClubSettings(e) {
     const res = await apiFetch(`/Clubs/${selectedClubId}`, {
       method: "PUT",
       body: JSON.stringify({
-        name: document.getElementById("set-club-name").value,
+        name: document.getElementById("set-club-name").value.trim(),
         dayOfWeek: Number(document.getElementById("set-club-day").value),
         startTime: document.getElementById("set-club-time").value,
         expectedPlayers: Number(document.getElementById("set-club-players").value),
@@ -285,6 +380,10 @@ async function handleAdjustReserve(e) {
   e.preventDefault();
   const op = document.getElementById("reserve-op").value;
   const amount = Number(document.getElementById("reserve-amount").value);
+  if (amount <= 0) {
+    showToast("Informe um valor maior que zero.");
+    return;
+  }
   const delta = op === "withdraw" ? -amount : amount;
   try {
     const res = await apiFetch(`/Clubs/${selectedClubId}/cash-reserve`, {
@@ -343,7 +442,7 @@ async function loadClubMatches(clubId) {
 }
 
 async function goToMatchFromHome(matchId) {
-  navigateTo("matches");
+  await navigateTo("matches");
   await openMatchDetails(matchId);
 }
 
@@ -365,7 +464,10 @@ function getNextClubOccurrenceISO(club) {
 
 async function quickScheduleNextWeeklyMatch() {
   const club = myClubs.find(c => c.id === selectedClubId);
-  if (!club) return;
+  if (!club) {
+    showToast("Selecione ou crie um clube antes de agendar uma pelada.");
+    return;
+  }
 
   const nextDateTime = getNextClubOccurrenceISO(club);
   const defaultCost = club.defaultVenue?.defaultPrice ? Number(club.defaultVenue.defaultPrice) : 300.00;
@@ -382,7 +484,7 @@ async function quickScheduleNextWeeklyMatch() {
       })
     });
     showToast(`Pelada fixa de ${DAYS[club.dayOfWeek]} agendada!`);
-    navigateTo("matches");
+    await navigateTo("matches");
     await loadClubMatches(club.id);
     await openMatchDetails(res.id);
   } catch (err) {
@@ -391,20 +493,28 @@ async function quickScheduleNextWeeklyMatch() {
 }
 
 async function openMatchModal() {
-  cachedVenues = await apiFetch("/Venues");
-  const select = document.getElementById("match-venue-select");
-  select.innerHTML = `<option value="">Digitar valor manualmente</option>` +
-    cachedVenues.map(v => `<option value="${v.id}">${v.name} ${v.defaultPrice ? `(R$ ${Number(v.defaultPrice).toFixed(2)})` : "(Sob consulta)"}</option>`).join("");
-
-  const club = myClubs.find(c => c.id === selectedClubId);
-  if (club) {
-    document.getElementById("match-datetime").value = getNextClubOccurrenceISO(club);
-    if (club.defaultVenue) {
-      select.value = club.defaultVenue.id;
-      applyVenuePriceToMatch(club.defaultVenue.id);
-    }
+  if (!selectedClubId) {
+    showToast("Selecione ou crie um clube primeiro.");
+    return;
   }
-  openModal("modal-match");
+  try {
+    cachedVenues = await apiFetch("/Venues");
+    const select = document.getElementById("match-venue-select");
+    select.innerHTML = `<option value="">Digitar valor manualmente</option>` +
+      cachedVenues.map(v => `<option value="${v.id}">${v.name} ${v.defaultPrice ? `(R$ ${Number(v.defaultPrice).toFixed(2)})` : "(Sob consulta)"}</option>`).join("");
+
+    const club = myClubs.find(c => c.id === selectedClubId);
+    if (club) {
+      document.getElementById("match-datetime").value = getNextClubOccurrenceISO(club);
+      if (club.defaultVenue) {
+        select.value = club.defaultVenue.id;
+        applyVenuePriceToMatch(club.defaultVenue.id);
+      }
+    }
+    openModal("modal-match");
+  } catch (err) {
+    showToast(err.message);
+  }
 }
 
 function applyVenuePriceToMatch(venueId) {
@@ -423,13 +533,13 @@ async function handleCreateMatch(e) {
         clubId: selectedClubId,
         matchDateTime: document.getElementById("match-datetime").value,
         courtCost: Number(document.getElementById("match-cost").value),
-        pixReceiverName: document.getElementById("match-pix-name").value,
-        pixKey: document.getElementById("match-pix-key").value
+        pixReceiverName: document.getElementById("match-pix-name").value.trim(),
+        pixKey: document.getElementById("match-pix-key").value.trim()
       })
     });
     closeModal("modal-match");
     showToast(res.message);
-    navigateTo("matches");
+    await navigateTo("matches");
     await loadClubMatches(selectedClubId);
     await openMatchDetails(res.id);
   } catch (err) {
@@ -438,39 +548,43 @@ async function handleCreateMatch(e) {
 }
 
 async function openMatchDetails(matchId) {
-  currentMatch = await apiFetch(`/Matches/${matchId}`);
-  const panel = document.getElementById("match-detail-panel");
-  panel.classList.remove("hidden");
+  try {
+    currentMatch = await apiFetch(`/Matches/${matchId}`);
+    const panel = document.getElementById("match-detail-panel");
+    panel.classList.remove("hidden");
 
-  const canManage = currentMatch.myRole >= 1;
-  const dt = new Date(currentMatch.matchDateTime).toLocaleString("pt-BR", { dateStyle: "full", timeStyle: "short" });
-  const statusMap = { 0: "LISTA ABERTA (VALOR ESTIMADO)", 1: "JANELA PIX ABERTA (VALOR CONGELADO)", 3: "SÚMULA VALIDADA" };
+    const canManage = currentMatch.myRole >= 1;
+    const dt = new Date(currentMatch.matchDateTime).toLocaleString("pt-BR", { dateStyle: "full", timeStyle: "short" });
+    const statusMap = { 0: "LISTA ABERTA (VALOR ESTIMADO)", 1: "JANELA PIX ABERTA (VALOR CONGELADO)", 3: "SÚMULA VALIDADA" };
 
-  document.getElementById("detail-status-badge").textContent = statusMap[currentMatch.status] || "EM ANDAMENTO";
-  document.getElementById("detail-title").textContent = `${currentMatch.clubName} — ${dt}`;
-  document.getElementById("detail-subtitle").textContent =
-    `Quadra: R$ ${Number(currentMatch.courtCost).toFixed(2)} • Vagas: ${currentMatch.expectedPlayers}`;
+    document.getElementById("detail-status-badge").textContent = statusMap[currentMatch.status] || "EM ANDAMENTO";
+    document.getElementById("detail-title").textContent = `${currentMatch.clubName} — ${dt}`;
+    document.getElementById("detail-subtitle").textContent =
+      `Quadra: R$ ${Number(currentMatch.courtCost).toFixed(2)} • Vagas: ${currentMatch.expectedPlayers}`;
 
-  updatePixCountdown();
-  if (countdownTimer) clearInterval(countdownTimer);
-  countdownTimer = setInterval(updatePixCountdown, 60000);
+    updatePixCountdown();
+    if (countdownTimer) clearInterval(countdownTimer);
+    countdownTimer = setInterval(updatePixCountdown, 60000);
 
-  document.getElementById("fin-per-player").textContent = `R$ ${Number(currentMatch.financialSummary.estimatedPerPlayer).toFixed(2)}`;
-  document.getElementById("fin-collected").textContent = `R$ ${Number(currentMatch.financialSummary.totalCollected).toFixed(2)}`;
-  document.getElementById("fin-surplus").textContent = `R$ ${Number(currentMatch.financialSummary.surplusToReserve).toFixed(2)}`;
-  document.getElementById("fin-pix-key").textContent = currentMatch.pixKey
-    ? `${currentMatch.pixKey} (${currentMatch.pixReceiverName || ""})`
-    : "Não informada";
+    document.getElementById("fin-per-player").textContent = `R$ ${Number(currentMatch.financialSummary.estimatedPerPlayer).toFixed(2)}`;
+    document.getElementById("fin-collected").textContent = `R$ ${Number(currentMatch.financialSummary.totalCollected).toFixed(2)}`;
+    document.getElementById("fin-surplus").textContent = `R$ ${Number(currentMatch.financialSummary.surplusToReserve).toFixed(2)}`;
+    document.getElementById("fin-pix-key").textContent = currentMatch.pixKey
+      ? `${currentMatch.pixKey} (${currentMatch.pixReceiverName || ""})`
+      : "Não informada";
 
-  document.getElementById("btn-open-pix").classList.toggle("hidden", !canManage || currentMatch.status !== 0);
-  document.getElementById("btn-draw-teams").classList.toggle("hidden", !canManage);
-  document.getElementById("guest-bar").classList.toggle("hidden", !canManage);
-  document.getElementById("sumula-admin-bar").classList.toggle("hidden", !canManage);
+    document.getElementById("btn-open-pix").classList.toggle("hidden", !canManage || currentMatch.status !== 0);
+    document.getElementById("btn-draw-teams").classList.toggle("hidden", !canManage);
+    document.getElementById("guest-bar").classList.toggle("hidden", !canManage);
+    document.getElementById("sumula-admin-bar").classList.toggle("hidden", !canManage);
 
-  renderRoster();
-  renderTeams();
-  renderSumula();
-  panel.scrollIntoView({ behavior: "smooth" });
+    renderRoster();
+    renderTeams();
+    renderSumula();
+    panel.scrollIntoView({ behavior: "smooth" });
+  } catch (err) {
+    showToast(err.message);
+  }
 }
 
 function updatePixCountdown() {
@@ -497,9 +611,13 @@ function updatePixCountdown() {
 }
 
 function copyMatchPixKey() {
-  if (!currentMatch?.pixKey) return;
-  navigator.clipboard.writeText(currentMatch.pixKey);
-  showToast("Chave Pix copiada!");
+  if (!currentMatch?.pixKey) {
+    showToast("Nenhuma chave Pix cadastrada nesta partida.");
+    return;
+  }
+  navigator.clipboard.writeText(currentMatch.pixKey)
+    .then(() => showToast("Chave Pix copiada!"))
+    .catch(() => showToast("Não foi possível copiar automaticamente. Selecione e copie a chave."));
 }
 
 function openPixPaymentModal(regId, amount) {
@@ -516,8 +634,9 @@ function openPixPaymentModal(regId, amount) {
 
 function copyPixFromModal() {
   const key = document.getElementById("pix-modal-key").value;
-  navigator.clipboard.writeText(key);
-  showToast("Chave Pix copiada para a área de transferência!");
+  navigator.clipboard.writeText(key)
+    .then(() => showToast("Chave Pix copiada para a área de transferência!"))
+    .catch(() => showToast("Selecione a chave acima e copie manualmente."));
 }
 
 function copyWhatsAppRoster() {
@@ -541,11 +660,13 @@ function copyWhatsAppRoster() {
     });
   }
 
-  navigator.clipboard.writeText(text);
-  showToast("Lista formatada copiada para colar no WhatsApp!");
+  navigator.clipboard.writeText(text)
+    .then(() => showToast("Lista formatada copiada para colar no WhatsApp!"))
+    .catch(() => showToast("Não foi possível copiar a lista para o WhatsApp."));
 }
 
 async function joinCurrentMatch(isGoalkeeper) {
+  if (!currentMatch) return;
   try {
     const res = await apiFetch(`/Matches/${currentMatch.id}/join`, {
       method: "POST",
@@ -561,12 +682,15 @@ async function joinCurrentMatch(isGoalkeeper) {
 
 async function addGuest() {
   const input = document.getElementById("guest-name-input");
-  if (!input.value.trim()) return;
+  if (!input.value.trim()) {
+    showToast("Digite o nome do convidado antes de adicionar.");
+    return;
+  }
   try {
     const res = await apiFetch(`/Matches/${currentMatch.id}/guests`, {
       method: "POST",
       body: JSON.stringify({
-        guestName: input.value,
+        guestName: input.value.trim(),
         isGoalkeeper: document.getElementById("guest-gk-input").checked
       })
     });
@@ -720,13 +844,19 @@ function renderTeams() {
 
 // ================= SÚMULA INTELIGENTE =================
 async function createGame() {
+  const teamLeft = document.getElementById("game-left").value;
+  const teamRight = document.getElementById("game-right").value;
+  if (teamLeft === teamRight) {
+    showToast("Escolha dois times diferentes para criar o confronto.");
+    return;
+  }
   try {
     await apiFetch(`/Matches/${currentMatch.id}/games`, {
       method: "POST",
       body: JSON.stringify({
-        title: document.getElementById("game-title").value,
-        teamLeft: document.getElementById("game-left").value,
-        teamRight: document.getElementById("game-right").value
+        title: document.getElementById("game-title").value.trim() || "Jogo",
+        teamLeft,
+        teamRight
       })
     });
     showToast("Jogo adicionado na súmula!");
@@ -739,7 +869,10 @@ async function createGame() {
 async function addGoal(gameId, teamName) {
   const scorerId = document.getElementById(`scorer-${gameId}`).value;
   const assistId = document.getElementById(`assist-${gameId}`).value || null;
-  if (!scorerId) return;
+  if (!scorerId) {
+    showToast("Selecione o jogador que marcou o gol.");
+    return;
+  }
 
   try {
     await apiFetch(`/Matches/${currentMatch.id}/games/${gameId}/goals`, {
@@ -939,8 +1072,8 @@ async function handleCreateVenue(e) {
     await apiFetch("/Venues", {
       method: "POST",
       body: JSON.stringify({
-        name: document.getElementById("venue-name").value,
-        address: document.getElementById("venue-address").value,
+        name: document.getElementById("venue-name").value.trim(),
+        address: document.getElementById("venue-address").value.trim(),
         defaultPrice: priceVal ? Number(priceVal) : null
       })
     });
@@ -999,13 +1132,13 @@ async function handleUpdateProfile(e) {
     const res = await apiFetch("/Auth/me", {
       method: "PUT",
       body: JSON.stringify({
-        fullName: document.getElementById("edit-name").value,
+        fullName: document.getElementById("edit-name").value.trim(),
         position: document.getElementById("edit-position").value,
         preferredFoot: Number(document.getElementById("edit-foot").value),
         shirtNumber: Number(document.getElementById("edit-shirt").value),
-        city: document.getElementById("edit-city").value || null,
-        phone: document.getElementById("edit-phone").value || null,
-        photoUrl: document.getElementById("edit-photo").value || null
+        city: document.getElementById("edit-city").value.trim() || null,
+        phone: document.getElementById("edit-phone").value.trim() || null,
+        photoUrl: document.getElementById("edit-photo").value.trim() || null
       })
     });
     showToast(res.message);
@@ -1030,6 +1163,6 @@ function closeModal(id) { document.getElementById(id).classList.add("hidden"); }
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/sw.js").catch(() => {});
+    navigator.serviceWorker.register("./sw.js").catch(() => {});
   });
 }
