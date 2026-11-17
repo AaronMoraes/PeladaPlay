@@ -171,4 +171,31 @@ public class ClubsController : ControllerBase
 
         return Ok(new { message = "Você entrou no clube com sucesso!", clubId = club.Id });
     }
+
+    [HttpPatch("{clubId}/members/{userId}/rank")]
+    public async Task<IActionResult> UpdateMemberRank(Guid clubId, Guid userId, [FromBody] UpdateRankDto dto)
+    {
+        var currentUserIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (currentUserIdClaim == null || !Guid.TryParse(currentUserIdClaim, out var currentUserId))
+            return Unauthorized();
+
+        var club = await _context.Clubs
+            .Include(c => c.Members)
+            .FirstOrDefaultAsync(c => c.Id == clubId);
+
+        if (club == null) return NotFound(new { message = "Clube não encontrado." });
+
+        // Verifica se quem está alterando é Admin/Organizador do clube
+        var currentMembership = club.Members.FirstOrDefault(m => m.UserId == currentUserId);
+        if (currentMembership == null || currentMembership.Role == ClubRole.Player)
+            return Forbid();
+
+        var targetMembership = club.Members.FirstOrDefault(m => m.UserId == userId);
+        if (targetMembership == null) return NotFound(new { message = "Membro não encontrado no clube." });
+
+        targetMembership.SkillRank = dto.SkillRank;
+        await _context.SaveChangesAsync();
+
+        return Ok(new { message = "Rank atualizado com sucesso!" });
+    }
 }

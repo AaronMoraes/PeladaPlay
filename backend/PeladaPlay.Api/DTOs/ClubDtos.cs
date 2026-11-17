@@ -23,3 +23,8 @@ public class CashReserveDto
     public decimal Amount { get; set; }
     public string Reason { get; set; } = string.Empty;
 }
+
+public class UpdateRankDto
+{
+    public int SkillRank { get; set; }
+}
